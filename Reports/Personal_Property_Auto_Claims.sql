@@ -1,4 +1,3 @@
-CREATE TABLE RSUTHRAP.RPT_CC_PANL_AUTO_PRTY_CLAIM AS
 WITH CLAIM_DATA AS (
             SELECT
                 C.ID            AS CLAIM_KEY,
@@ -23,6 +22,7 @@ WITH CLAIM_DATA AS (
             select POLICYID
             , MAX(AGENCYDOMICILESTATE_EXT) AS AGENCYDOMICILESTATE
             , MAX(DECODE(CTROLE_POLICY_TYPECODE, 'agent', NAME)) AS AGENCY
+            , MAX(DECODE(CTROLE_POLICY_TYPECODE, 'underwriter', NAME)) AS UNDERWRITER
             from (
                 SELECT
                          CCTRP.POLICYID
@@ -41,17 +41,16 @@ WITH CLAIM_DATA AS (
                 FROM
                 CLAIM_DATA CD 
                 INNER JOIN CC_CLAIMCONTACTROLE@ECIG_TO_CC_LINK CCTRP ON CCTRP.POLICYID=CD.POLICY_KEY  AND CCTRP.RETIRED=0 -- FOR AGENT
-                INNER JOIN CCTL_CONTACTROLE@ECIG_TO_CC_LINK TLCCTR ON TLCCTR.ID=CCTRP.ROLE AND TLCCTR.TYPECODE IN ('agent', 'insured') AND TLCCTR.RETIRED=0 -- FOR AGENT
+                INNER JOIN CCTL_CONTACTROLE@ECIG_TO_CC_LINK TLCCTR ON TLCCTR.ID=CCTRP.ROLE AND TLCCTR.TYPECODE IN ('agent', 'insured', 'underwriter') AND TLCCTR.RETIRED=0 -- FOR AGENT
                 INNER JOIN CC_CLAIMCONTACT@ECIG_TO_CC_LINK CCTP ON  CCTRP.ClaimContactID=CCTP.ID AND CCTP.RETIRED=0 -- FOR AGENT
                 INNER JOIN CC_CONTACT@ECIG_TO_CC_LINK CTP ON CTP.ID=CCTP.CONTACTID AND CTP.RETIRED=0)
                 GROUP BY POLICYID
             ),
             CLAIMANT_TRANS AS(
-            SELECT SUM(LOSS_RESERVE) AS LOSS_RESERVE,SUM(LOSS_PAID)AS LOSS_PAID , CLAIM_KEY as CLAIM_KEY , DATE_RSRVE_CHNGED AS DATE_RSRVE_CHNGED
-            FROM (
             SELECT  
                        CD.CLAIM_KEY 
                     , TRLI.CLAIMAMOUNT
+                    , TLRC.NAME   AS TRANS_TYPE
                     , TR.EXPOSUREID  AS TR_EXPOSUREID
                     ,   CASE
                             WHEN TLTR.NAME = 'Payment'
@@ -59,25 +58,46 @@ WITH CLAIM_DATA AS (
                                 ( TRLI.CLAIMAMOUNT )
                       END                        AS LOSS_PAID 
                     , CASE
+                            WHEN TLTR.NAME = 'Payment'
+                                 AND TLCSTTY.TYPECODE = 'aoexpense' THEN 
+                                ( TRLI.CLAIMAMOUNT )
+                      END                        AS UNALLOC_EXPENSE_PAID 
+                    , CASE
+                            WHEN TLTR.NAME = 'Payment'
+                                 AND TLCSTTY.TYPECODE = 'dccexpense' THEN 
+                                ( TRLI.CLAIMAMOUNT )
+                      END                         AS ALLOC_EXPENSE_PAID 
+                    -- RESERVES
+                    , CASE
                             WHEN TLTR.NAME = 'Reserve'
                                  AND TLCSTTY.TYPECODE = 'claimcost' THEN 
                                 ( TRLI.RESERVINGAMOUNT )
-                      END                          AS  LOSS_RESERVE
+                      END                          AS LOSS_RESERVE
+                    , CASE
+                            WHEN TLTR.NAME = 'Reserve'
+                                 AND TLCSTTY.TYPECODE = 'aoexpense' THEN 
+                                ( TRLI.RESERVINGAMOUNT )
+                        END                        AS UNALLOC_EXPENSE_RESERVE,
+                        CASE
+                            WHEN TLTR.NAME = 'Reserve'
+                                 AND TLCSTTY.TYPECODE = 'dccexpense' THEN 
+                                ( TRLI.RESERVINGAMOUNT )
+                        END                        AS ALLOC_EXPENSE_RESERVE   
                      , CASE 
                            WHEN  TLTR.NAME = 'Reserve' THEN
                              TR.UPDATETIME  
                            END AS DATE_RSRVE_CHNGED
                     FROM CLAIM_DATA CD 
                     INNER JOIN CC_TRANSACTION@ECIG_TO_CC_LINK                TR ON TR.CLAIMID = CD.CLAIM_KEY AND TR.RETIRED = 0
+                    LEFT OUTER JOIN CCTL_RECOVERYCATEGORY@ECIG_TO_CC_LINK    TLRC ON TLRC.ID   = TR.RECOVERYCATEGORY AND TLRC.RETIRED = 0
                     INNER JOIN CCTL_TRANSACTION@ECIG_TO_CC_LINK              TLTR ON TLTR.ID = TR.SUBTYPE AND TLTR.RETIRED = 0
                     INNER JOIN CC_TRANSACTIONLINEITEM@ECIG_TO_CC_LINK        TRLI ON TRLI.TRANSACTIONID = TR.ID AND TRLI.RETIRED = 0
                     LEFT OUTER JOIN CCTL_TRANSACTIONSTATUS@ECIG_TO_CC_LINK   TLTRS ON TLTRS.ID = TR.STATUS AND TLTRS.RETIRED = 0
-                    LEFT OUTER JOIN CCTL_COSTTYPE@ECIG_TO_CC_LINK            TLCSTTY ON TLCSTTY.ID = TR.COSTTYPE AND TLCSTTY.RETIRED = 0)
-                    GROUP BY CLAIM_KEY , DATE_RSRVE_CHNGED
-            ),
+                    LEFT OUTER JOIN CCTL_COSTTYPE@ECIG_TO_CC_LINK            TLCSTTY ON TLCSTTY.ID = TR.COSTTYPE AND TLCSTTY.RETIRED = 0
+                ),
             CLAIM AS
             (
-              SELECT
+              SELECT DISTINCT
              -- CD.CLAIM_KEY,
               CD.POLICY_SEARCH_NBR,
               CD.EXPIRATION,
@@ -88,13 +108,27 @@ WITH CLAIM_DATA AS (
               CD.DATE_OF_LOSS,
               CD.CAUSE_NAME,
               CD.CLAIM_STATUS,
-              CLT.LOSS_RESERVE AS LR_PRTY_CL_RPT,
-              CLT.LOSS_PAID AS LP_PRTY_CL_RPT,
-              CLT.DATE_RSRVE_CHNGED AS DRCHNGED_PRTY_CL_RPT, 
-              CD.FAULT AS FAULT_AUTO_CL_RPT
+              SUM(DECODE(CLT.TRANS_TYPE,'Subrogation',0,'Salvage',0,'Deductible',0,LTRIM('Credit to expense'),0,LTRIM('Credit to loss'),0,
+                        (NVL(CLT.LOSS_RESERVE,0)+NVL(CLT.UNALLOC_EXPENSE_RESERVE,0)+NVL(CLT.ALLOC_EXPENSE_RESERVE,0)
+                        -NVL(CLT.LOSS_PAID,0)-NVL(CLT.UNALLOC_EXPENSE_PAID,0)-NVL(CLT.ALLOC_EXPENSE_PAID,0)))) RESERVE,
+                        
+              SUM(NVL(CLT.LOSS_PAID,0)+NVL(CLT.UNALLOC_EXPENSE_PAID,0)+NVL(CLT.ALLOC_EXPENSE_PAID,0)) TOTAL_PAID,
+              
+              SUM(CASE WHEN CLT.TRANS_TYPE IN ('Subrogation' , 'Salvage' , 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))
+              THEN
+              NVL(CLT.LOSS_PAID,0)+NVL(CLT.UNALLOC_EXPENSE_PAID,0)+NVL(CLT.ALLOC_EXPENSE_PAID,0) 
+              ELSE 
+              NVL(CLT.LOSS_RESERVE,0)+NVL(CLT.UNALLOC_EXPENSE_RESERVE,0)+NVL(CLT.ALLOC_EXPENSE_RESERVE,0) END) LOSS_ALAE_INCURRED, 
+              CLT.DATE_RSRVE_CHNGED, 
+              CD.FAULT AS FAULT_AUTO_CL_RPT,
+              -- CRU INDICATOR
+              PC.UNDERWRITER 
               FROM CLAIM_DATA CD
               INNER JOIN POLICY_CONTACTS PC ON PC.POLICYID=CD.POLICY_KEY
               LEFT OUTER JOIN CLAIMANT_TRANS CLT ON CLT.CLAIM_KEY=CD.CLAIM_KEY
+              group by CD.POLICY_SEARCH_NBR, CD.EXPIRATION, CD.AGENCY_CODE, PC.AGENCY, PC.AGENCYDOMICILESTATE, 
+                CD.CLAIM_NBR, CD.DATE_OF_LOSS, CD.CAUSE_NAME, CD.CLAIM_STATUS, CLT.LOSS_RESERVE, 
+                CLT.DATE_RSRVE_CHNGED, CD.FAULT, PC.UNDERWRITER
             )
            SELECT * FROM CLAIM;
 
