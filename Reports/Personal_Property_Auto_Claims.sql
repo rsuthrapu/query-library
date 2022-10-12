@@ -1,5 +1,3 @@
-ALTER SESSION SET CURRENT_SCHEMA = CIGADMIN;
-
 WITH CLAIM_DATA AS (
             SELECT
                 C.ID            AS CLAIM_KEY,
