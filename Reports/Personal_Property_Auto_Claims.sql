@@ -1,3 +1,4 @@
+CREATE TABLE RPT_PL_AUTO_PRTY AS
 WITH CLAIM_DATA AS (
             SELECT
                 C.ID            AS CLAIM_KEY,
@@ -138,7 +139,7 @@ WITH CLAIM_DATA AS (
               CLT.RESERVE,
               CLT.TOTAL_PAID,
               CLT.LOSS_ALAE_INCURRED,
-            --  PC.UNDERWRITER ,
+              PC.UNDERWRITER ,
               NVL(CRU.CRU_INDICATOR,0) AS CRU_INDICATOR
               FROM CLAIM_DATA CD
               INNER JOIN POLICY_CONTACTS PC ON PC.POLICYID=CD.POLICY_KEY
@@ -155,9 +156,11 @@ WITH CLAIM_DATA AS (
                         CL.CLAIM_NBR,
                         CL.DATE_OF_LOSS,
                         CL.CLAIM_STATUS,
-                        CL.CLAIM
-                    FROM CLAIM CL, POLICY P, AGENCY A
+                        CL.CLAIM,
+                        UW.UNDERWRITER 
+                    FROM CLAIM CL, POLICY P, AGENCY A , UNDERWITER UW
                     WHERE CL.POLICY = P.POLICY AND P.AGENCY_CODE = A.AGENCY_CODE AND P.BUSINESS_LINE IN(1,5,7,17)
+                    AND UW.AGENCY_CODE  = A.AGENCY_CODE
               --      AND TRUNC(DATE_OF_LOSS) > LAST_DAY(ADD_MONTHS(TO_DATE(SYSDATE,'DD-MON-YYYY'),-72))
                 ),
             CLAIMANT_TRANS_ECIG AS(
@@ -222,6 +225,7 @@ WITH CLAIM_DATA AS (
                         CTE.RESERVE,
                         CTE.TOTAL_PAID,
                         CTE.LOSS_ALAE_INCURRED,
+                        CDE.UNDERWRITER,
                         NVL(CRU.CRU_INDICATOR,0) AS CRU_INDICATOR
                   FROM CLAIM_DATA_ECIG CDE
                   LEFT OUTER JOIN CLAIMANT_TRANS_ECIG CTE ON CTE.CLAIM = CDE.CLAIM
