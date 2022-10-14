@@ -1,4 +1,3 @@
-CREATE TABLE RPT_PL_AUTO_PRTY AS
 WITH CLAIM_DATA AS (
             SELECT
                 C.ID            AS CLAIM_KEY,
@@ -157,8 +156,9 @@ WITH CLAIM_DATA AS (
                         CL.DATE_OF_LOSS,
                         CL.CLAIM_STATUS,
                         CL.CLAIM,
-                        UW.UNDERWRITER 
-                    FROM CLAIM CL, POLICY P, AGENCY A , UNDERWITER UW
+                        UW.PERSONAL_UNDERWRITER AS UNDERWRITER 
+                    FROM CLAIM CL, POLICY P, AGENCY A , SQA06.UNDERWRITER UW  -- NOTE : UNDERWRITER TABLE HAS TO BE REPLACE WITH 
+                                                                                       -- DATALAKE.BRVW_MASTER_AGENCY@CIGDW_ANALYTICS_LINK_USER WHEN IT IS PROMOTING TO PROD.
                     WHERE CL.POLICY = P.POLICY AND P.AGENCY_CODE = A.AGENCY_CODE AND P.BUSINESS_LINE IN(1,5,7,17)
                     AND UW.AGENCY_CODE  = A.AGENCY_CODE
               --      AND TRUNC(DATE_OF_LOSS) > LAST_DAY(ADD_MONTHS(TO_DATE(SYSDATE,'DD-MON-YYYY'),-72))
@@ -231,7 +231,6 @@ WITH CLAIM_DATA AS (
                   LEFT OUTER JOIN CLAIMANT_TRANS_ECIG CTE ON CTE.CLAIM = CDE.CLAIM
                   LEFT OUTER JOIN CRU_DATA_ECIG CRU ON CRU.CLAIM = CDE.CLAIM
                   LEFT OUTER JOIN PAF_ECIG PAF ON PAF.CLAIM =  CDE.CLAIM
-                  -- DATALAKE.BRVW_MASTER_AGENCY@CIGDW_ANALYTICS_LINK_USER; TODO UNDERWRITER
                   ),
                   PL_UNIONS_ECIG_CC AS (
                     SELECT * FROM PL_AUTO_PRTY_ECIG_RPT
