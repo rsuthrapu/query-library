@@ -115,6 +115,7 @@ SELECT   dwc.Claim_Nbr
               THEN -1*NVL(dwcd.Unalloc_Expense_Paid,0)
               ELSE 0
         END AS "AO_Salvage"
+        ,DWC.source
 FROM    whouse.DW_CLAIMANT DWCT
 LEFT JOIN    MAX_CLAIMDETAIL MAXDET
 ON           MAXDET.CLAIM_KEY = DWCT.CLAIM_KEY
@@ -204,6 +205,7 @@ END AS "Litigation_Flag"
 ,Loss_Salvage as Salvage_Recovery
 ,DCC_Paid
 ,AO_Paid
+,DWC.source
 FROM whouse.DW_CLAIMANT DWCT
 left join MAX_CLAIMDETAIL MAXDET ON MAXDET.CLAIM_KEY = DWCT.CLAIM_KEY
 JOIN whouse.DW_CLAIM DWC ON DWC.CLAIM_KEY = DWCT.CLAIM_KEY
