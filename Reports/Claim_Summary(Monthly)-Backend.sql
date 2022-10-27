@@ -43,7 +43,7 @@ SELECT   dwc.Claim_Nbr
         ,dwcd.Business_Line_Name
         ,dwcd.Dept_Desc
         ,dwc.Claim_Status_Date AS "Claim_Reported"  
-        ,NVL(c.Is_RQY,0) AS "RQY_Flag"
+        --,NVL(c.Is_RQY,0) AS "RQY_Flag"
         ,NVL(dwct.CAT_NBR,'N/A') AS "CAT_Number"
         ,NVL(DWCT.CAT_DESC,'Non-CAT') AS "CAT_Description"
         
@@ -115,13 +115,12 @@ SELECT   dwc.Claim_Nbr
               THEN -1*NVL(dwcd.Unalloc_Expense_Paid,0)
               ELSE 0
         END AS "AO_Salvage"
-        ,DWC.source
 FROM    whouse.DW_CLAIMANT DWCT
 LEFT JOIN    MAX_CLAIMDETAIL MAXDET
 ON           MAXDET.CLAIM_KEY = DWCT.CLAIM_KEY
 JOIN    whouse.DW_CLAIMANT_DETAIL DWCD ON DWCD.CLAIMANT_KEY = DWCT.CLAIMANT_KEY AND     DWCD.CLAIM_KEY = DWCT.CLAIM_KEY
 JOIN    whouse.DW_CLAIM DWC ON      DWC.CLAIM_KEY = DWCD.CLAIM_KEY
-JOIN    cigadmin.CLAIM C ON      c.Claim = dwct.Claim_Key and dwct.source = 'CMS'
+--JOIN    cigadmin.CLAIM C ON      c.Claim = dwct.Claim_Key
 --LEFT JOIN cigadmin.CMS_LEGAL_ACTION LA ON        LA.CLAIM = DWCT.CLAIM_KEY
 
 WHERE   ( ( DWCD.CLAIM_KEY IN (SELECT * FROM DISTINCT_CLAIMKEY) 
@@ -191,7 +190,7 @@ SELECT  DISTINCT dwc.Claim_Nbr
 END AS "Close_Date"
 ,dwct.Date_of_Loss
 ,dwc.Claim_Status_Date AS "Claim_Reported" 
-,NVL(c.Is_RQY,0) AS "RQY_Flag"
+--,NVL(c.Is_RQY,0) AS "RQY_Flag"
 ,NVL(dwct.CAT_NBR,'N/A') AS "CAT_Number"
 ,NVL(DWCT.CAT_DESC,'Non-CAT') AS "CAT_Description"
 ,maxdet.STAFF_ADJUSTER AS "Current_CIG_Adjustor"
@@ -205,11 +204,10 @@ END AS "Litigation_Flag"
 ,Loss_Salvage as Salvage_Recovery
 ,DCC_Paid
 ,AO_Paid
-,DWC.source
 FROM whouse.DW_CLAIMANT DWCT
 left join MAX_CLAIMDETAIL MAXDET ON MAXDET.CLAIM_KEY = DWCT.CLAIM_KEY
 JOIN whouse.DW_CLAIM DWC ON DWC.CLAIM_KEY = DWCT.CLAIM_KEY
-JOIN cigadmin.CLAIM C ON C.CLAIM = DWCT.CLAIM_KEY and DWCT.source = 'CMS'
+--JOIN cigadmin.CLAIM C ON C.CLAIM = DWCT.CLAIM_KEY
 --LEFT JOIN cigadmin.CMS_LEGAL_ACTION LA ON la.Claim = dwct.Claim_Key
 left join financials f on DWCT.CLAIM_KEY = f.CLAIM_KEY
 WHERE EXTRACT(YEAR FROM DWC.CLAIM_STATUS_DATE) >= (EXTRACT(YEAR FROM SYSDATE) - 2)
@@ -217,3 +215,5 @@ WHERE EXTRACT(YEAR FROM DWC.CLAIM_STATUS_DATE) >= (EXTRACT(YEAR FROM SYSDATE) - 
 ORDER BY dwct.Date_of_Loss ASC
   ,dwc.Claim_Nbr ASC
 ;
+
+
