@@ -391,22 +391,22 @@ WITH LOSS_RATIO_CC AS(
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_5YR                   
             ,CASE WHEN SUM(NVL(CATASTROPHE,0)) > 0 THEN 1 ELSE 0 END CAT_FLAG                              
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-5 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-5 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END
             ELSE 0 END) INCURRED_LOSS_2013                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-4 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                     
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-4 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                     
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE  NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END
             ELSE 0 END) INCURRED_LOSS_2014                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-3 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-3 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2015                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-2 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                     
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-2 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                     
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2016                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-1 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                     
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-1 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                     
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2017                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022 THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR THEN CASE WHEN TRANS_TYPE IN ('Subrogation', 'Salvage', 'Deductible',LTRIM('Credit to expense'), LTRIM('Credit to loss'))                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2018 , SOURCE
             FROM (
@@ -470,22 +470,22 @@ WITH LOSS_RATIO_CC AS(
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_5YR                   
             ,CASE WHEN SUM(NVL(CATASTROPHE,0)) > 0 THEN 1 ELSE 0 END CAT_FLAG                              
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-5 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-5 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END
             ELSE 0 END) INCURRED_LOSS_2013                 
             ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-4 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE  NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END
             ELSE 0 END) INCURRED_LOSS_2014                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-3 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-3 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2015                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-2 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-2 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2016                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022-1 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR-1 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2017                 
-            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = 2022 THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
+            ,SUM(CASE WHEN EXTRACT(YEAR FROM TRANS_DATE) = :YEAR THEN CASE WHEN TRANS_TYPE IN ('Credit Salvage', 'Credit Subro', 'Credit Other')                    
             THEN NVL(LOSS_PAID,0)+NVL(ALLOC_EXPENSE_PAID,0)+NVL(UNALLOC_EXPENSE_PAID,0) ELSE NVL(LOSS_RESERVE,0)+NVL(ALLOC_EXPENSE_RESERVE,0)+NVL(UNALLOC_EXPENSE_RESERVE,0) END 
             ELSE 0 END) INCURRED_LOSS_2018 , SOURCE
             FROM(
