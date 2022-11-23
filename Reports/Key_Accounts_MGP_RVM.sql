@@ -368,10 +368,10 @@ ECIG_DATA AS
         dp.TERM_EXPIRATION_DATE, 
         dp.agency_domicile_state AS DOMICILE_STATE,
         ASL.A_S_LINE_NBR,
-        C.COVERAGE_DESC AS COVERAGE,
+        COV.COVERAGE_DESC AS COVERAGE,
         case 
-          when lower(C.coverage_desc) like '%liability%' then 'Liability'
-          when C.coverage_desc like 'Boiler '|| chr(38) ||' Machinery' then 'Boiler Machinery'
+          when lower(COV.coverage_desc) like '%liability%' then 'Liability'
+          when COV.coverage_desc like 'Boiler '|| chr(38) ||' Machinery' then 'Boiler Machinery'
           when col.CAUSE_NAME = 'Fire' then 'Fire'
           when col.CAUSE_NAME = 'Storm' then 'Storm'
           when col.CAUSE_NAME = 'Theft' then 'Theft'
@@ -406,7 +406,7 @@ ECIG_DATA AS
         INNER JOIN CLAIMANT_COVERAGE CC ON CC.CLAIM=C.CLAIM
         INNER JOIN cause_of_loss col ON cc.cause_of_loss=col.cause_of_loss
         --INNER JOIN CLAIMANT_TRANS@ECHO_ANALYTICS_LINK_USER CT ON COL.CAUSE_OF_LOSS =CT.CAUSE_OF_LOSS AND CC.CLAIM=CT.CLAIM AND C.CLAIM=CT.CLAIM
-        INNER JOIN COVERAGE C ON C.COVERAGE=CC.COVERAGE
+        INNER JOIN COVERAGE COV ON COV.COVERAGE=CC.COVERAGE
         INNER JOIN A_S_COVERAGE_LINE  ASCL ON ASCL.A_S_COVERAGE_LINE=C.A_S_COVERAGE_LINE
         INNER JOIN A_S_LINE  ASL ON ASL.A_S_LINE=ASCL.A_S_LINE
         --INNER JOIN INCURRED_LOSS@ECHO_ANALYTICS_LINK_USER IL ON IL.CLAIM=C.CLAIM
@@ -425,10 +425,10 @@ select
         cpc.TERM_EXPIRATION_DATE,   
         cpc.agency_domicile_state AS DOMICILE_STATE, 
         ASL.A_S_LINE_NBR,
-        C.COVERAGE_DESC AS COVERAGE,
+        COV.COVERAGE_DESC AS COVERAGE,
          case 
-          when lower(C.coverage_desc) like '%liability%' then 'Liability'
-          when C.coverage_desc like 'Boiler '|| chr(38) ||' Machinery' then 'Boiler Machinery'
+          when lower(COV.coverage_desc) like '%liability%' then 'Liability'
+          when COV.coverage_desc like 'Boiler '|| chr(38) ||' Machinery' then 'Boiler Machinery'
           when col.CAUSE_NAME = 'Fire' then 'Fire'
           when col.CAUSE_NAME = 'Storm' then 'Storm'
           when col.CAUSE_NAME = 'Theft' then 'Theft'
@@ -462,7 +462,7 @@ from
         INNER JOIN ADDR AD ON AD.addr = CL.addr
 
         INNER JOIN CLAIMANT_COVERAGE CC ON CC.CLAIM=C.CLAIM
-        INNER JOIN COVERAGE C ON C.COVERAGE=CC.COVERAGE
+        INNER JOIN COVERAGE COV ON COV.COVERAGE=CC.COVERAGE
         INNER JOIN A_S_COVERAGE_LINE  ASCL ON ASCL.A_S_COVERAGE_LINE=C.A_S_COVERAGE_LINE
         INNER JOIN A_S_LINE  ASL ON ASL.A_S_LINE=ASCL.A_S_LINE
         INNER JOIN cause_of_loss col ON cc.cause_of_loss=col.cause_of_loss
@@ -483,10 +483,10 @@ select
         P.ExpirationDate AS  TERM_EXPIRATION_DATE, 
         ctp.AGENCYDOMICILESTATE_EXT AS DOMICILE_STATE,
         ASL.A_S_LINE_NBR,
-        '' as COVERAGE, --   C.COVERAGE_DESC AS COVERAGE,
+        TLCOVTY.description AS COVERAGE,
        case 
-        --  when lower(C.coverage_desc) like '%liability%' then 'Liability'
-        --  when C.coverage_desc like 'Boiler '|| chr(38) ||' Machinery' then 'Boiler Machinery'
+          when lower(TLCOVTY.description) like '%liability%' then 'Liability'
+          when TLCOVTY.description like 'Boiler '|| chr(38) ||' Machinery' then 'Boiler Machinery'
           when TLLC.NAME = 'Fire' then 'Fire'
           when TLLC.NAME = 'Storm' then 'Storm'
           when TLLC.NAME = 'Theft' then 'Theft'
@@ -506,7 +506,7 @@ select
        NULL AS INCURRED_LOSS,
        (SUBSTR(DECODE(TLCCTR.TYPECODE, 'insured', CTP.LASTNAME || ' ' || CTP.FIRSTNAME),1,80)) AS INSURED_NAME,
        TLCS.NAME AS CLAIM_STATUS,
-       to_char(c.UPDATETIME, 'mm/dd/yyyy')  FIRST_MODIFIED_BY_CLAIM,
+       to_char(c.CREATETIME, 'mm/dd/yyyy')  FIRST_MODIFIED_BY_CLAIM,
        to_char(C.CloseDate , 'mm/dd/yyyy') DATE_OF_CLOSURE,
        'CC' as "APP"
 FROM CC_CLAIM@ECIG_TO_CC_LINK C
@@ -514,6 +514,7 @@ INNER JOIN CC_EXPOSURE@ECIG_TO_CC_LINK EX ON EX.CLAIMID=C.ID AND EX.RETIRED=0
 INNER JOIN CC_POLICY@ECIG_TO_CC_LINK P ON C.POLICYID =  P.ID AND P.RETIRED = 0
 LEFT OUTER JOIN DEC_POLICY DP ON DP.DEC_POLICY = P.DECPOLICY_EXT
 LEFT OUTER JOIN CC_COVERAGE@ECIG_TO_CC_LINK COV ON COV.ID=EX.COVERAGEID AND COV.RETIRED=0
+ LEFT OUTER JOIN CCTL_COVERAGETYPE@ECIG_TO_CC_LINK TLCOVTY ON TLCOVTY.ID=COV.TYPE AND TLCOVTY.RETIRED=0
 LEFT OUTER JOIN A_S_COVERAGE_LINE ASCL ON ASCL.A_S_COVERAGE_LINE=COV.ASCOVERAGELINE_EXT
 LEFT OUTER JOIN A_S_LINE ASL ON ASL.A_S_LINE=ASCL.A_S_LINE
 INNER JOIN CC_CLAIMCONTACTROLE@ECIG_TO_CC_LINK CCTRP ON CCTRP.POLICYID=C.POLICYID  AND CCTRP.RETIRED=0 -- FOR AGENT
@@ -663,7 +664,6 @@ CD.AY, CD.KEY_ACCOUNT_NAME, CD.DATE_OF_LOSS, CD.POLICY_SEARCH_NUMBER,
 FROM 
 CMS_DATA CD 
 INNER JOIN CMS_CC_IL CIL ON CIL.CLAIM=CD.CLAIM AND CIL.CAUSE_NAME=CD.cause_of_loss-- AND CIL.COVERAGE_DESC=CD.COVERAGE
---INNER JOIN CC_INCURRED_LOSS CCIL ON CCIL.CLAIM = CD.CLAIM AND CCIL.CAUSE_NAME=CD.cause_of_loss
 )
 
 SELECT CD.* --DISTINCT POLICY_SEARCH_NUMBER
@@ -697,4 +697,6 @@ FROM CMS_CC_DATA_WITH_INCURRED_LOSS CD
 --POLICY_SEARCH_NUMBER='6-BOP-1-1869930'
 ORDER BY CD.KEY_ACCOUNT_NAME, CD.AY, CD.DATE_OF_LOSS, CD.TERM_EFFECTIVE_DATE, CD.DOMICILE_STATE
 ;
+
+
 
