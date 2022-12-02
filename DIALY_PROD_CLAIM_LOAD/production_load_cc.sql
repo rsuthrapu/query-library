@@ -462,16 +462,79 @@ totcause as ( --HUB-552/553 sc
 ),
 --/*end cause level information*/
 --/*transaction level information*/
-ceded as (
-   select claimant_trans
+-- ceded as (
+--    select claimant_trans
+--          ,sum(loss_reserve) as ceded_caseos_loss
+--          ,sum(expense_reserve) as ceded_caseos_alae_dcc
+--          ,sum(ulae_reserve) as ceded_caseos_alae_ao
+--          ,sum(loss_paid) as ceded_paid_loss
+--          ,sum(expense_paid) as ceded_paid_alae_dcc
+--          ,sum(ulae_paid) as ceded_paid_alae_ao
+--    from DATALAKE.DAILY_CEDED_CLAIMANT_TRANS
+--    group by claimant_trans
+-- ),
+with cms_ceded as 
+(
+select claimant_trans
          ,sum(loss_reserve) as ceded_caseos_loss
          ,sum(expense_reserve) as ceded_caseos_alae_dcc
          ,sum(ulae_reserve) as ceded_caseos_alae_ao
          ,sum(loss_paid) as ceded_paid_loss
          ,sum(expense_paid) as ceded_paid_alae_dcc
          ,sum(ulae_paid) as ceded_paid_alae_ao
-   from DATALAKE.DAILY_CEDED_CLAIMANT_TRANS
+   from CEDED_CLAIMANT_TRANS
    group by claimant_trans
+),
+cc_ceded AS(
+            SELECT claimant_trans, SUM(ceded_paid_loss) AS ceded_paid_loss,SUM(ceded_paid_alae_dcc)AS ceded_paid_alae_dcc,
+            SUM(ceded_caseos_loss) AS ceded_caseos_loss, SUM(ceded_caseos_alae_dcc) AS ceded_caseos_alae_dcc, 
+            SUM(ceded_paid_alae_ao) AS ceded_paid_alae_ao , SUM(ceded_caseos_alae_ao) AS ceded_caseos_alae_ao
+            FROM (
+            SELECT 
+                  RIT.CLAIMAMOUNT  AS CEDED_AMOUNT,
+                  EX.ID AS claimant_trans,
+                 CASE
+                        WHEN TLRIT.name = 'RIRecoverable'
+                             AND TLCSTTY.typecode IN( 'claimcost', 'dccexpense')  THEN 
+                         ( RIT.CLAIMAMOUNT )
+                    END                        AS ceded_paid_loss,                         
+                    CASE
+                        WHEN TLRIT.name = 'RIRecoverable'
+                             AND TLCSTTY.typecode = 'dccexpense' THEN 
+                            ( RIT.CLAIMAMOUNT )
+                    END                        AS ceded_paid_alae_dcc,                         
+                    CASE
+                        WHEN TLRIT.name = 'RICededReserve'
+                             AND TLCSTTY.typecode IN( 'claimcost', 'dccexpense')  THEN 
+                         ( RIT.CLAIMAMOUNT )
+                    END                        AS ceded_caseos_loss,                         
+                    CASE
+                        WHEN TLRIT.name = 'RICededReserve'
+                             AND TLCSTTY.typecode = 'dccexpense' THEN 
+                            ( RIT.CLAIMAMOUNT )
+                    END                        AS ceded_caseos_alae_dcc  
+                    , CASE
+                        WHEN TLRIT.name = 'RIRecoverable'
+                             AND TLCSTTY.typecode = 'aoexpense' THEN 
+                            ( RIT.CLAIMAMOUNT )
+                    END                        AS ceded_paid_alae_ao            
+                    , CASE
+                        WHEN TLRIT.name = 'RICededReserve'
+                             AND TLCSTTY.typecode = 'aoexpense' THEN 
+                            ( RIT.CLAIMAMOUNT )
+                    END                        AS ceded_caseos_alae_ao
+            from CC_CLAIM@ECIG_TO_CC_LINK C
+            INNER JOIN CC_EXPOSURE@ECIG_TO_CC_LINK EX ON EX.CLAIMID=C.ID AND EX.RETIRED=0
+            LEFT OUTER JOIN CC_RITRANSACTION@ECIG_TO_CC_LINK         RIT ON RIT.CLAIMID = C.ID 
+            LEFT OUTER JOIN CCTL_RITRANSACTION@ECIG_TO_CC_LINK       TLRIT ON TLRIT.ID = RIT.SUBTYPE AND  TLRIT.RETIRED=0
+            LEFT OUTER JOIN CCTL_COSTTYPE@ECIG_TO_CC_LINK            TLCSTTY ON TLCSTTY.ID = RIT.COSTTYPE AND TLCSTTY.RETIRED = 0)
+            GROUP BY claimant_trans
+),
+ceded AS 
+(
+SELECT * FROM cms_ceded
+UNION ALL
+select * from cc_ceded
 ),
 transfilter as (
    select distinct vcc.claim
