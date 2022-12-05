@@ -523,11 +523,11 @@ cc_ceded AS(
                              AND TLCSTTY.typecode = 'aoexpense' THEN 
                             ( RIT.CLAIMAMOUNT )
                     END                        AS ceded_caseos_alae_ao
-            from CC_CLAIM@ECIG_TO_CC_LINK C
-            INNER JOIN CC_EXPOSURE@ECIG_TO_CC_LINK EX ON EX.CLAIMID=C.ID AND EX.RETIRED=0
-            LEFT OUTER JOIN CC_RITRANSACTION@ECIG_TO_CC_LINK         RIT ON RIT.CLAIMID = C.ID 
-            LEFT OUTER JOIN CCTL_RITRANSACTION@ECIG_TO_CC_LINK       TLRIT ON TLRIT.ID = RIT.SUBTYPE AND  TLRIT.RETIRED=0
-            LEFT OUTER JOIN CCTL_COSTTYPE@ECIG_TO_CC_LINK            TLCSTTY ON TLCSTTY.ID = RIT.COSTTYPE AND TLCSTTY.RETIRED = 0)
+            from DATALAKE.DAILY_CC_CLAIM@ECIG_TO_CC_LINK C
+            INNER JOIN DATALAKE.DAILY_CC_EXPOSURE@ECIG_TO_CC_LINK EX ON EX.CLAIMID=C.ID AND EX.RETIRED=0
+            LEFT OUTER JOIN DATALAKE.DAILY_CC_RITRANSACTION@ECIG_TO_CC_LINK         RIT ON RIT.CLAIMID = C.ID 
+            LEFT OUTER JOIN DATALAKE.DAILY_CCTL_RITRANSACTION@ECIG_TO_CC_LINK       TLRIT ON TLRIT.ID = RIT.SUBTYPE AND  TLRIT.RETIRED=0
+            LEFT OUTER JOIN DATALAKE.DAILY_CCTL_COSTTYPE@ECIG_TO_CC_LINK            TLCSTTY ON TLCSTTY.ID = RIT.COSTTYPE AND TLCSTTY.RETIRED = 0)
             GROUP BY claimant_trans
 ),
 ceded AS 
@@ -536,6 +536,7 @@ SELECT * FROM cms_ceded
 UNION ALL
 select * from cc_ceded
 ),
+-- CC intg done in visual_load_datalake.sql and the feeding source is DATALAKE.VW_CLAIMANT_TRANS
 transfilter as (
    select distinct vcc.claim
    from (
@@ -545,6 +546,7 @@ transfilter as (
    ) vct
       inner join vcc on vct.claimant_coverage = vcc.claimant_coverage
 ),
+-- CC intg done in visual_load_datalake.sql and the feeding source is DATALAKE.VW_CLAIMANT_TRANS
 trans as (
    SELECT VCT3.CLAIM, VCT3.TRANSACTION_PRIMARY, VCT3.TRANSACTION_STATUS, VCT3.TRANSACTION_DATE
          ,vct3.dept, vct3.department_number, vct3.department_name, vct3.business_line_name, vct3.major_line_name, vct3.core_line_of_business, vct3.cause_name --HUB-552/553 sc
