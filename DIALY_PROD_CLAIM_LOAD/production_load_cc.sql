@@ -537,6 +537,7 @@ UNION ALL
 select * from cc_ceded
 ),
 -- CC intg done in visual_load_datalake.sql and the feeding source is DATALAKE.VW_CLAIMANT_TRANS
+-- pending is l_transtype fields
 transfilter as (
    select distinct vcc.claim
    from (
@@ -547,6 +548,7 @@ transfilter as (
       inner join vcc on vct.claimant_coverage = vcc.claimant_coverage
 ),
 -- CC intg done in visual_load_datalake.sql and the feeding source is DATALAKE.VW_CLAIMANT_TRANS
+-- pending is l_transtype fields
 trans as (
    SELECT VCT3.CLAIM, VCT3.TRANSACTION_PRIMARY, VCT3.TRANSACTION_STATUS, VCT3.TRANSACTION_DATE
          ,vct3.dept, vct3.department_number, vct3.department_name, vct3.business_line_name, vct3.major_line_name, vct3.core_line_of_business, vct3.cause_name --HUB-552/553 sc
