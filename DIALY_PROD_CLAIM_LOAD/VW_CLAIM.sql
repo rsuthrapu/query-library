@@ -36,7 +36,13 @@
                     NVL (state, 'Unknown')  AS claim_state,
                     NVL (country, 'Unknown') AS claim_country,
                     TRUNC (last_modified)   AS c_trans_date,
-                    load_date               AS c_load_date
+                    load_date               AS c_load_date,
+                    'CMS' as claim_source,
+                     case when DEC_POLICY is not null then
+                      'PC'
+                      else
+                      'eCIG' 
+                      end as policy_source
                FROM dec30_claim
              UNION
              SELECT claim,
@@ -55,13 +61,23 @@
                     NVL (state, 'Unknown')  AS claim_state,
                     NVL (country, 'Unknown') AS claim_country,
                     TRUNC (last_modified)   AS c_trans_date,
-                    load_date               AS c_load_date
+                    load_date               AS c_load_date,
+                    'CMS' as claim_source,
+                     case when DEC_POLICY is not null then
+                      'PC'
+                      else
+                      'eCIG' 
+                      end as policy_source
                FROM datalake.daily_claim
              WHERE load_date > TO_DATE ('12-30-2015', 'mm-dd-yyyy')
                           union 
-             SELECT c.id as claim,
+             SELECT  c.id as claim,
                     p.id as policy,
-                    P.DECPOLICY_EXT AS dec_policy, 
+                    case when P.DECPOLICY_EXT is not null THEN
+                      p.PolicySystemPeriodID
+                      else
+                      P.DECPOLICY_EXT
+                     END AS dec_policy,  
                     CCAT.ID  AS catastrophe,
                     TLS.NAME AS claim_status,
                     C.LOSSDATE as date_of_loss,
@@ -73,9 +89,15 @@
                     NVL (CA.CITY, 'Unknown')   AS claim_city,
                     NVL (CA.COUNTY, 'Unknown') AS claim_county,
                     NVL (TLST.TYPECODE, 'Unknown')  AS claim_state,
-                    NVL (CA.COUNTRY, 'Unknown') AS claim_country,
+                    NVL(CA.COUNTRY, 0) AS claim_country,
                     TRUNC (C.UPDATETIME)   AS c_trans_date,
-                    C.load_date               AS c_load_date
+                    C.load_date               AS c_load_date,
+                    'CC' as claim_source,
+                     case when p.DECPOLICY_EXT is not null then
+                      'PC'
+                      else
+                      'eCIG' 
+                      end as policy_source
               from datalake.daily_cc_claim c
               INNER JOIN datalake.daily_CC_POLICY P ON P.ID=C.POLICYID
               LEFT OUTER JOIN datalake.daily_CCTL_CLAIMSTATE TLS ON TLS.ID = C.STATE AND TLS.RETIRED = 0

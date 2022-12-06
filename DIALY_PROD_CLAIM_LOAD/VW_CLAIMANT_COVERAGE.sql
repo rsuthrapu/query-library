@@ -2,7 +2,7 @@
 --  DDL for View VW_CLAIMANT_COVERAGE
 --------------------------------------------------------
 
-  CREATE OR REPLACE FORCE EDITIONABLE VIEW "DATALAKE"."VW_CLAIMANT_COVERAGE" ("CLAIMANT_COVERAGE", "CLAIM", "CLAIMANT", "CAUSE_OF_LOSS", "COVERAGE", "CAUSE_STATUS", "DEPT", "CC_TRANS_DATE", "CC_LOAD_DATE") AS 
+CREATE OR REPLACE FORCE EDITIONABLE VIEW "DATALAKE"."VW_CLAIMANT_COVERAGE" ("CLAIMANT_COVERAGE", "CLAIM", "CLAIMANT", "CAUSE_OF_LOSS", "COVERAGE", "CAUSE_STATUS", "DEPT", "CC_TRANS_DATE", "CC_LOAD_DATE") AS 
 SELECT CLAIMANT_COVERAGE,
             CLAIM,
             CLAIMANT,
@@ -41,10 +41,10 @@ SELECT CLAIMANT_COVERAGE,
                     TLLC.NAME  AS cause_of_loss,
                     COV.ID AS coverage,
                     TLES.NAME  AS cause_status,
-                    NVL (PD.DEPTNUMBER, 0)       AS dept,
+                    NVL (D.DEPT, 0)       AS dept,
                     TRUNC (TR.UPDATETIME) AS cc_trans_date,
                     TR.load_date           AS cc_load_date
-               FROM datalake.DAILY_CC_CLAIM@ECIG_TO_CC_LINK C
+               FROM datalake.DAILY_CC_CLAIM C
                LEFT OUTER JOIN datalake.DAILY_CCTL_LOSSCAUSE  TLLC ON TLLC.ID = C.LOSSCAUSE AND TLLC.RETIRED = 0
                INNER JOIN datalake.DAILY_CC_TRANSACTION TR ON TR.CLAIMID=C.ID AND TR.RETIRED=0
                INNER JOIN datalake.DAILY_CC_CLAIMCONTACT CCTE ON  CCTE.CLAIMID=C.ID AND CCTE.RETIRED=0 
@@ -52,7 +52,8 @@ SELECT CLAIMANT_COVERAGE,
                LEFT OUTER JOIN datalake.DAILY_CC_COVERAGE COV ON COV.ID=EX.COVERAGEID
                INNER JOIN datalake.DAILY_CCTL_EXPOSURESTATE TLES ON TLES.ID = EX.STATE AND TLES.RETIRED = 0
                INNER JOIN datalake.DAILY_CC_POLICY P ON P.ID=C.POLICYID AND P.RETIRED=0
-              LEFT OUTER JOIN datalake.DAILY_CCX_POLICYDEPARTMENT_EXT PD ON P.POLICYDEPARTMENT_EXTID = PD.ID AND PD.RETIRED = 0
+               LEFT OUTER JOIN datalake.DAILY_CCX_POLICYDEPARTMENT_EXT PD ON P.POLICYDEPARTMENT_EXTID = PD.ID AND PD.RETIRED = 0
+               LEFT OUTER JOIN datalake.DAILY_DEPT D ON D.dept_nbr = PD.DEPTNUMBER
             WHERE  TR.load_date > TO_DATE ('12-30-2015', 'mm-dd-yyyy')
             )
    ORDER BY claimant_coverage, cc_trans_date;

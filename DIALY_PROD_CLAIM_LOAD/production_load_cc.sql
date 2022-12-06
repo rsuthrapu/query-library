@@ -299,6 +299,7 @@ WITH DCLAIM AS (
    where claimlookup_rowmax=1
 ),
 -- INTEGRATED CC DATA INTO VW_CLAIM
+-- add source column
 vc as (
    select claim, policy, dec_policy, catastrophe
         ,claim_number, claim_prefix, date_of_loss, claim_description
@@ -331,7 +332,7 @@ vc as (
 --       ) where suitstatus_rowmax=1) status on legal.cms_suit_status = status.cms_suit_status
 -- ),
 
--- CC INTRAGED . NEED TO CLARIFY ON VW_CMS_LEGAL_ACTION FIELDS W.R.T CC
+-- CC INTRAGED . PENDING  :  NEED TO CLARIFY ON VW_CMS_LEGAL_ACTION FIELDS W.R.T CC
 vcla as (
    select claim, suit_status
    from (
@@ -367,6 +368,7 @@ vcla as (
 --       from DATALAKE.DAILY_CATASTROPHE dcatastrophe
 --    ) where catastrophe_rowmax=1
 -- ),
+-- Integrated with CC
 WITH CMS_dcatastrophe as (
    select catastrophe, cat_no as cat_number
    from (
@@ -433,7 +435,7 @@ vcc as ( --HUB-552/553 sc
       FROM DATALAKE.VW_CLAIMANT_COVERAGE
     ) WHERE CC_ROWMAX=1
 ),
--- -- INTEGRATED WITH CC. PENDING BRVW_DEPARTMENT
+-- -- INTEGRATED WITH CC.  
 totcause as ( --HUB-552/553 sc
    SELECT
        vcc.claimant_coverage, vcc.claim, vcc.dept, col.CAUSE_OF_LOSS, col.CAUSE_NAME
@@ -473,6 +475,7 @@ totcause as ( --HUB-552/553 sc
 --    from DATALAKE.DAILY_CEDED_CLAIMANT_TRANS
 --    group by claimant_trans
 -- ),
+-- INTEGRATED WITH CC DATA
 with cms_ceded as 
 (
 select claimant_trans
@@ -523,11 +526,11 @@ cc_ceded AS(
                              AND TLCSTTY.typecode = 'aoexpense' THEN 
                             ( RIT.CLAIMAMOUNT )
                     END                        AS ceded_caseos_alae_ao
-            from DATALAKE.DAILY_CC_CLAIM@ECIG_TO_CC_LINK C
-            INNER JOIN DATALAKE.DAILY_CC_EXPOSURE@ECIG_TO_CC_LINK EX ON EX.CLAIMID=C.ID AND EX.RETIRED=0
-            LEFT OUTER JOIN DATALAKE.DAILY_CC_RITRANSACTION@ECIG_TO_CC_LINK         RIT ON RIT.CLAIMID = C.ID 
-            LEFT OUTER JOIN DATALAKE.DAILY_CCTL_RITRANSACTION@ECIG_TO_CC_LINK       TLRIT ON TLRIT.ID = RIT.SUBTYPE AND  TLRIT.RETIRED=0
-            LEFT OUTER JOIN DATALAKE.DAILY_CCTL_COSTTYPE@ECIG_TO_CC_LINK            TLCSTTY ON TLCSTTY.ID = RIT.COSTTYPE AND TLCSTTY.RETIRED = 0)
+            from DATALAKE.DAILY_CC_CLAIM C
+            INNER JOIN DATALAKE.DAILY_CC_EXPOSURE EX ON EX.CLAIMID=C.ID AND EX.RETIRED=0
+            LEFT OUTER JOIN DATALAKE.DAILY_CC_RITRANSACTION         RIT ON RIT.CLAIMID = C.ID 
+            LEFT OUTER JOIN DATALAKE.DAILY_CCTL_RITRANSACTION       TLRIT ON TLRIT.ID = RIT.SUBTYPE AND  TLRIT.RETIRED=0
+            LEFT OUTER JOIN DATALAKE.DAILY_CCTL_COSTTYPE            TLCSTTY ON TLCSTTY.ID = RIT.COSTTYPE AND TLCSTTY.RETIRED = 0)
             GROUP BY claimant_trans
 ),
 ceded AS 
