@@ -1,4 +1,4 @@
-    create table DLAKEDEV.TEMP_CLAIMTRANS_CC as
+create table DLAKEDEV.TEMP_CLAIMTRANS_CC as
 WITH DCLAIM AS (
     select *
     from (
@@ -23,30 +23,29 @@ vc as (
    where claimlookup_rowmax=1
 ),
 vcla as (
-  select claim, suit_status, CLAIM_SOURCE
+  select claim, suit_status,CLAIM_SOURCE
    from (
-      select claim, cms_suit_status
+      select claim, cms_suit_status,CLAIM_SOURCE
       from (
-         select claim, cms_suit_status
+         select claim, cms_suit_status, CLAIM_SOURCE
             ,row_number() over (partition by claim order by legal_trans_date desc) legal_rowmax
          from DLAKEDEV.VW_CMS_LEGAL_ACTION
        ) where legal_rowmax=1) legal
          left outer join (
-      select cms_suit_status, suit_status, CLAIM_SOURCE
+      select cms_suit_status, suit_status
       from (
          select cms_suit_status, suit_status_desc as suit_status,
                       'CMS' AS CLAIM_SOURCE
                ,row_number() over (partition by cms_suit_status order by trunc(last_modified) desc) suitstatus_rowmax
          from DATALAKE.DAILY_CMS_SUIT_STATUS) where suitstatus_rowmax=1
          UNION 
-        select cms_suit_status, suit_status, CLAIM_SOURCE
+        select cms_suit_status, suit_status
           from (
          select ID AS cms_suit_status
          , CASE WHEN FINALSETTLEDATE IS NOT NULL
                         Then 'Close'
                         ELSE 'Open'
-                      END suit_status,
-                      'CC' AS CLAIM_SOURCE
+                      END suit_status
                ,row_number() over (partition by ID order by trunc(UPDATETIME) desc) cc_suitstatus_rowmax
          from DLAKEDEV.DAILY_CC_MATTER) where cc_suitstatus_rowmax=1) status
          on legal.cms_suit_status = status.cms_suit_status
@@ -148,13 +147,15 @@ select claimant_trans
          ,sum(loss_paid) as ceded_paid_loss
          ,sum(expense_paid) as ceded_paid_alae_dcc
          ,sum(ulae_paid) as ceded_paid_alae_ao
+         ,'CMS'AS CLAIM_SOURCE 
    from DATALAKE.DAILY_CEDED_CLAIMANT_TRANS
-   group by claimant_trans
+   group by claimant_trans, 'CMS'
 ),
 cc_ceded AS(
             SELECT claimant_trans, SUM(ceded_paid_loss) AS ceded_paid_loss,SUM(ceded_paid_alae_dcc)AS ceded_paid_alae_dcc,
             SUM(ceded_caseos_loss) AS ceded_caseos_loss, SUM(ceded_caseos_alae_dcc) AS ceded_caseos_alae_dcc, 
-            SUM(ceded_paid_alae_ao) AS ceded_paid_alae_ao , SUM(ceded_caseos_alae_ao) AS ceded_caseos_alae_ao
+            SUM(ceded_paid_alae_ao) AS ceded_paid_alae_ao , SUM(ceded_caseos_alae_ao) AS ceded_caseos_alae_ao,
+            CLAIM_SOURCE
             FROM (
             SELECT 
                   RIT.CLAIMAMOUNT  AS CEDED_AMOUNT,
@@ -189,12 +190,13 @@ cc_ceded AS(
                              AND TLCSTTY.typecode = 'aoexpense' THEN 
                             ( RIT.CLAIMAMOUNT )
                     END                        AS ceded_caseos_alae_ao
+                    ,'CC' AS CLAIM_SOURCE 
             from DLAKEDEV.DAILY_CC_CLAIM C
             INNER JOIN DLAKEDEV.DAILY_CC_EXPOSURE EX ON EX.CLAIMID=C.ID AND EX.RETIRED=0
             LEFT OUTER JOIN DLAKEDEV.DAILY_CC_RITRANSACTION         RIT ON RIT.CLAIMID = C.ID 
             LEFT OUTER JOIN DLAKEDEV.DAILY_CCTL_RITRANSACTION       TLRIT ON TLRIT.ID = RIT.SUBTYPE AND  TLRIT.RETIRED=0
             LEFT OUTER JOIN DLAKEDEV.DAILY_CCTL_COSTTYPE            TLCSTTY ON TLCSTTY.ID = RIT.COSTTYPE AND TLCSTTY.RETIRED = 0)
-            GROUP BY claimant_trans
+            GROUP BY claimant_trans, CLAIM_SOURCE
 ),
 ceded AS 
 (
@@ -284,7 +286,7 @@ vc.dec_policy
 ,-(ceded.ceded_expense_paid+ceded.ceded_ulae_paid) as ceded_paid_alae 
 ,1 as is_ceded_correction
 ,vc.claim_report_date  --AS-52
-,vcla.claim_source
+,vcla.CLAIM_SOURCE
 from ceded_corrections ceded 
 left join vc on vc.claim = ceded.claim_key
 left join (select claim, dept from vcc group by claim, dept)vcc on vcc.claim = ceded.claim_key
@@ -293,8 +295,7 @@ left join dcatastrophe on vc.catastrophe = dcatastrophe.catastrophe
 left join datalake.brvw_department department on vcc.dept = department.dept
 left join pcclaim on vc.claim = pcclaim.claim
 left join datalake.l_transtype transtype on transtype.trans_type = ceded.trans_type
-)
-,alltrans as (
+),alltrans as (
 select totclaim.dec_policy, totclaim.claim, trans.dept, totclaim.policy_search_nbr, totclaim.dec_sequence
          ,trans.transaction_date
          ,trans.department_number, trans.department_name, trans.business_line_name, trans.major_line_name, trans.core_line_of_business, trans.cause_name--hub-552/553 sc
@@ -316,8 +317,9 @@ select totclaim.dec_policy, totclaim.claim, trans.dept, totclaim.policy_search_n
 		 ,totclaim.claim_report_date , totclaim.claim_source --AS-52
    from totclaim
       inner join trans on totclaim.claim = trans.claim
-) 
+ ) 
 select * from alltrans
   union all
 select * from ceded_correct
+
 ;
