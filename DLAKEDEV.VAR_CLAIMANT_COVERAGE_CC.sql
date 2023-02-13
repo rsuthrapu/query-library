@@ -1,4 +1,4 @@
-CREATE TABLE DLAKEDEV.VAR_CLAIMANT_COVERAGE AS
+CREATE TABLE DLAKEDEV.VAR_CLAIMANT_COVERAGE_CC AS
 with vcc as (
    select claimant_coverage, claim, claimant, cause_of_loss, coverage, cause_status, dept,CLAIM_SOURCE from (
       select claimant_coverage, claim, claimant, cause_of_loss, coverage, cause_status, dept,CLAIM_SOURCE
