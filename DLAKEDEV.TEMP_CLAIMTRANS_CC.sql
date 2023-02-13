@@ -209,7 +209,7 @@ transfilter as (
    select distinct vcc.claim
    from (
       select distinct claimant_coverage
-      from DATALAKE.VAR_CLAIMANT_TRANS
+      from DLAKEDEV.VAR_CLAIMANT_TRANS_CC
       where trunc(transaction_date) > add_months(last_day(trunc(sysdate)),-61)
    ) vct
       inner join vcc on vct.claimant_coverage = vcc.claimant_coverage
@@ -224,7 +224,7 @@ trans as (
          ,sum(ceded_caseos_loss) as ceded_caseos_loss
          ,sum(ceded_caseos_alae_dcc) as ceded_caseos_alae_dcc, sum(ceded_caseos_alae_ao) as ceded_caseos_alae_ao
          ,sum(ceded_paid_loss) as ceded_paid_loss
-         ,sum(ceded_paid_alae_dcc) as ceded_paid_alae_dcc, sum(ceded_paid_alae_ao) as ceded_paid_alae_ao
+         ,sum(ceded_paid_alae_dcc) as ceded_paid_alae_dcc, sum(ceded_paid_alae_ao) as ceded_paid_alae_ao,VCT3.CLAIM_SOURCE
    from (
       SELECT VCT2.*, TOTCAUSE.CLAIM, TOTCAUSE.DEPT
             ,totcause.department_number, totcause.department_name, totcause.business_line_name, totcause.major_line_name, totcause.core_line_of_business, totcause.cause_name--HUB-552/553 sc
@@ -232,13 +232,14 @@ trans as (
          select vct.claimant_trans, vct.claimant_coverage, vct.transaction_primary, vct.transaction_status, vct.transaction_date
                ,vct.os_loss, vct.os_alae, vct.os_ulae, vct.paid_loss, vct.paid_alae, vct.paid_ulae
                ,ceded.ceded_caseos_loss, ceded.ceded_caseos_alae_dcc, ceded.ceded_caseos_alae_ao, ceded.ceded_paid_loss, ceded.ceded_paid_alae_dcc, ceded.ceded_paid_alae_ao
-         from DATALAKE.VAR_CLAIMANT_TRANS vct
+               ,vct.CLAIM_SOURCE
+         from DLAKEDEV.VAR_CLAIMANT_TRANS_CC vct
             left outer join ceded on vct.claimant_trans = ceded.claimant_trans
       ) vct2 inner join totcause on vct2.claimant_coverage = totcause.claimant_coverage
    ) vct3
       INNER JOIN TRANSFILTER ON VCT3.CLAIM = TRANSFILTER.CLAIM
    group by vct3.claim, vct3.transaction_primary, vct3.transaction_status, vct3.transaction_date
-         ,vct3.dept, vct3.department_number, vct3.department_name, vct3.business_line_name, vct3.major_line_name, vct3.core_line_of_business, VCT3.CAUSE_NAME--HUB-552/553 sc
+         ,vct3.dept, vct3.department_number, vct3.department_name, vct3.business_line_name, vct3.major_line_name, vct3.core_line_of_business, VCT3.CAUSE_NAME,VCT3.CLAIM_SOURCE--HUB-552/553 sc
 )
 ,ceded_correct as (
 select 
@@ -266,7 +267,7 @@ vc.dec_policy
 ,vc.claim_location 
 ,vcla.suit_status
 ,dcatastrophe.cat_number
-,transtype.transaction_primary
+,to_char(transtype.transaction_primary) AS transaction_primary
 ,to_char(transtype.transaction_status) as transaction_status
 ,-(ceded.loss_reserve-ceded.loss_paid) as direct_caseos_loss 
 ,-(ceded.alloc_expense_reserve-ceded.alloc_expense_paid) as direct_caseos_alae_dcc 
@@ -286,7 +287,7 @@ vc.dec_policy
 ,-(ceded.ceded_expense_paid+ceded.ceded_ulae_paid) as ceded_paid_alae 
 ,1 as is_ceded_correction
 ,vc.claim_report_date  --AS-52
-,vcla.CLAIM_SOURCE
+,vc.CLAIM_SOURCE
 from ceded_corrections ceded 
 left join vc on vc.claim = ceded.claim_key
 left join (select claim, dept from vcc group by claim, dept)vcc on vcc.claim = ceded.claim_key
@@ -295,7 +296,8 @@ left join dcatastrophe on vc.catastrophe = dcatastrophe.catastrophe
 left join datalake.brvw_department department on vcc.dept = department.dept
 left join pcclaim on vc.claim = pcclaim.claim
 left join datalake.l_transtype transtype on transtype.trans_type = ceded.trans_type
-),alltrans as (
+),
+alltrans as (
 select totclaim.dec_policy, totclaim.claim, trans.dept, totclaim.policy_search_nbr, totclaim.dec_sequence
          ,trans.transaction_date
          ,trans.department_number, trans.department_name, trans.business_line_name, trans.major_line_name, trans.core_line_of_business, trans.cause_name--hub-552/553 sc
