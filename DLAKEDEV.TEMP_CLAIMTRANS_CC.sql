@@ -75,12 +75,12 @@ SELECT * FROM CC_dcatastrophe
 ),
 pcclaim as (
 --/*change made to remove duplicate claims- sc 07112018*/ 
-    select cp.cms_policy,claim, policy_search_nbr, dec_sequence
+    select cp.cms_policy,claim, policy_search_nbr, dec_sequence, CLAIM_SOURCE
     from (
     select *
     from
     (
-          select cmsclaimpolicy.*
+          select cmsclaimpolicy.*, 'CMS' CLAIM_SOURCE
                 ,row_number() over (partition by Claim order by trunc(load_date) desc) cmsclaimpolicy_rowmax
           from DATALAKE.DAILY_CMS_CLAIM_POLICY cmsclaimpolicy
     ) where cmsclaimpolicy_rowmax=1) cp
@@ -92,6 +92,11 @@ pcclaim as (
           FROM DATALAKE.DAILY_CMS_POLICY CMSPOLICY) 
     where cmspolicy_rowmax=1) p
     on cp.cms_policy = p.cms_policy
+         UNION ALL
+  select 0 AS cms_policy,TO_NUMBER(C.ID) AS claim,P.POLICYNUMBER AS policy_search_nbr, DP.dec_sequence, 'CC' CLAIM_SOURCE
+  FROM DLAKEDEV.DAILY_CC_CLAIM C
+  INNER JOIN DLAKEDEV.DAILY_CC_POLICY P ON P.ID=C.POLICYID
+  LEFT OUTER JOIN DATALAKE.DAILY_DEC_POLICY DP ON DP.DEC_POLICY = P.DECPOLICY_EXT
 ),
 totclaim as (
    select
