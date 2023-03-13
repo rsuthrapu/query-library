@@ -73,11 +73,12 @@
                           union 
              SELECT  c.id as claim,
                     p.id as policy,
-                    case when P.DECPOLICY_EXT is not null THEN
-                      p.PolicySystemPeriodID
-                      else
-                      P.DECPOLICY_EXT
-                     END AS dec_policy,  
+                  P.DECPOLICY_EXT  AS dec_policy,
+--                    case when P.DECPOLICY_EXT is not null THEN
+--                      p.PolicySystemPeriodID
+--                      else
+--                      P.DECPOLICY_EXT
+--                     END AS dec_policy, 
                     CCAT.ID  AS catastrophe,
                     TLS.NAME AS claim_status,
                     C.LOSSDATE as date_of_loss,
