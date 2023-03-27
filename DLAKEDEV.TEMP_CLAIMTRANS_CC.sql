@@ -4,7 +4,7 @@ WITH DCLAIM AS (
     from (
       SELECT VWCLAIM.*
             ,row_number() over (partition by claim order by load_date desc) claimlookup_rowmax
-      from DATALAKE.DAILY_CLAIM vwclaim
+      from DLAKEDEV.DAILY_CLAIM vwclaim
    ) 
    where claimlookup_rowmax=1
 ),
@@ -27,8 +27,8 @@ vc as (
             ,ROW_NUMBER() OVER (PARTITION BY VWCLAIM.CLAIM ORDER BY VWCLAIM.C_TRANS_DATE DESC) CLAIMLOOKUP_ROWMAX
             ,dclaim.first_modified
       FROM DLAKEDEV.VW_CLAIM VWCLAIM
-      left join DCLAIM on DCLAIM.claim = vwclaim.claim
-      LEFT JOIN DCLAIMCC on DCLAIMCC.claim = vwclaim.claim
+      left join DCLAIM on DCLAIM.claim = vwclaim.claim AND DCLAIM.CLAIM_SOURCE = vwclaim.CLAIM_SOURCE 
+      LEFT JOIN DCLAIMCC on DCLAIMCC.claim = vwclaim.claim AND DCLAIMCC.CLAIM_SOURCE = vwclaim.CLAIM_SOURCE
    ) 
    where claimlookup_rowmax=1
 ),
@@ -117,9 +117,9 @@ totclaim as (
      ,nvl(dcatastrophe.cat_number,'N/A') as cat_number
 	 ,vc.claim_report_date,vc.claim_source  --AS-52
    from vc
-      left outer join vcla on vc.claim = vcla.claim
-      left outer join dcatastrophe on vc.catastrophe = dcatastrophe.catastrophe
-      left outer join pcclaim on vc.claim = pcclaim.claim
+      left outer join vcla on vc.claim = vcla.claim AND vc.claim_source = vcla.claim_source
+      left outer join dcatastrophe on vc.catastrophe = dcatastrophe.catastrophe AND  vc.claim_source = dcatastrophe.claim_source
+      left outer join pcclaim on vc.claim = pcclaim.claim and  vc.claim_source = pcclaim.claim_source
 ),
 --/*end claim level information*/
 --/*cause level information*/
@@ -333,7 +333,7 @@ select totclaim.dec_policy, totclaim.claim, trans.dept, totclaim.policy_search_n
          ,0 as is_ceded_correction
 		 ,totclaim.claim_report_date , totclaim.claim_source --AS-52
    from totclaim
-      inner join trans on totclaim.claim = trans.claim
+      inner join trans on totclaim.claim = trans.claim AND  totclaim.claim_source = trans.claim_source
  ) 
 select * from alltrans
   union all
