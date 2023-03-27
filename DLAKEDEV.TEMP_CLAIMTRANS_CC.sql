@@ -8,6 +8,15 @@ WITH DCLAIM AS (
    ) 
    where claimlookup_rowmax=1
 ),
+DCLAIMCC AS (
+    select *
+    from (
+      SELECT VWCLAIMCC.*
+            ,row_number() over (partition by claim order by load_date desc) cc_claimlookup_rowmax
+      from DLAKEDEV.VW_DAILY_CLAIM_CC vwclaimcc
+   ) 
+   where cc_claimlookup_rowmax=1
+),
 vc as (
    select claim, policy, dec_policy, catastrophe
         ,claim_number, claim_prefix, date_of_loss, claim_description
@@ -19,6 +28,7 @@ vc as (
             ,dclaim.first_modified
       FROM DLAKEDEV.VW_CLAIM VWCLAIM
       left join DCLAIM on DCLAIM.claim = vwclaim.claim
+      LEFT JOIN DCLAIMCC on DCLAIMCC.claim = vwclaim.claim
    ) 
    where claimlookup_rowmax=1
 ),
