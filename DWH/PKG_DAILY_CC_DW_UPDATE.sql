@@ -2071,7 +2071,7 @@ PROCEDURE SP_CCST_DW_CLAIMANT_ADJUSTER (
                     , TR.ID                     AS CLAIMANT_TRANS
                     , CD.EXPOSUREID             AS EX_EXPOSUREID
                     , TR.EXPOSUREID             AS TR_EXPOSUREID
-                    , TR.UPDATETIME             AS TRANS_DATE
+                    , CAST(TR.UPDATETIME AS DATE)   AS TRANS_DATE
                   --  , TR.CREATEUSERID           AS OPERATOR_USER_ID
                     , TRUCR.USERNAME            AS OPERATOR_ID
                     , TLTRS.NAME                AS TRANS_TYPE  
