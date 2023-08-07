@@ -28,3 +28,13 @@ BEGIN
     EXECUTE immediate 'DROP VIEW  '||rec.view_name || ' CASCADE CONSTRAINTS';
   END LOOP;
 END; 
+
+
+begin
+  for rec in (select table_name 
+              from   user_tables 
+              where  table_name IN('CCTL_','CC_','CCX_'))
+  loop
+    execute immediate 'drop table '||rec.table_name;
+  end loop;             
+end;

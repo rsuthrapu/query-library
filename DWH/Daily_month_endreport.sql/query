@@ -1,0 +1,105 @@
+/*DW_Claimant_detail*/
+Select
+  sum(nvl(dl.LOSS_PAID,0)) DIR_LOSS_PAID,
+  sum(nvl(dl.ALLOC_EXPENSE_PAID,0)) DIR_ALAE_PAID,
+  sum(nvl(dl.UNALLOC_EXPENSE_PAID,0)) DIR_ULAE_PAID,
+  sum(nvl(dl.LOSS_RESERVE,0)) DIR_LOSS_INC,
+  sum(nvl(dl.ALLOC_EXPENSE_RESERVE,0)) DIR_ALAE_INC,
+  sum(nvl(dl.UNALLOC_EXPENSE_RESERVE,0)) DIR_ULAE_INC,
+  sum(nvl(dl.CEDED_LOSS_PAID,0)) CEDED_LOSS_PAID,
+  sum(nvl(dl.CEDED_EXPENSE_PAID,0)) CEDED_ALAE_PAID,
+  sum(nvl(dl.CEDED_ULAE_PAID,0)) CEDED_ULAE_PAID,
+  sum(nvl(dl.CEDED_LOSS_PAID,0)+nvl(dl.CEDED_LOSS_RESERVE,0)) CEDED_LOSS_INC,
+  sum(nvl(dl.CEDED_EXPENSE_PAID,0)+nvl(dl.CEDED_EXPENSE_RESERVE,0)) CEDED_ALAE_INC,
+  sum(nvl(dl.CEDED_ULAE_PAID,0)+nvl(dl.CEDED_ULAE_RESERVE,0)) CEDED_ULAE_INC
+from dw_claimant_detail dl
+where 
+  extract(year from dl.trans_date) = 2023
+  and extract(month from dl.trans_date) = 8
+;
+
+--- CC Portion ---
+Select
+  sum(nvl(dl.LOSS_PAID,0)) DIR_LOSS_PAID,
+  sum(nvl(dl.ALLOC_EXPENSE_PAID,0)) DIR_ALAE_PAID,
+  sum(nvl(dl.UNALLOC_EXPENSE_PAID,0)) DIR_ULAE_PAID,
+  sum(nvl(dl.LOSS_RESERVE,0)) DIR_LOSS_INC,
+  sum(nvl(dl.ALLOC_EXPENSE_RESERVE,0)) DIR_ALAE_INC,
+  sum(nvl(dl.UNALLOC_EXPENSE_RESERVE,0)) DIR_ULAE_INC,
+  sum(nvl(dl.CEDED_LOSS_PAID,0)) CEDED_LOSS_PAID,
+  sum(nvl(dl.CEDED_EXPENSE_PAID,0)) CEDED_ALAE_PAID,
+  sum(nvl(dl.CEDED_ULAE_PAID,0)) CEDED_ULAE_PAID,
+  sum(nvl(dl.CEDED_LOSS_PAID,0)+nvl(dl.CEDED_LOSS_RESERVE,0)) CEDED_LOSS_INC,
+  sum(nvl(dl.CEDED_EXPENSE_PAID,0)+nvl(dl.CEDED_EXPENSE_RESERVE,0)) CEDED_ALAE_INC,
+  sum(nvl(dl.CEDED_ULAE_PAID,0)+nvl(dl.CEDED_ULAE_RESERVE,0)) CEDED_ULAE_INC,
+  dl.source,dl.trans_date
+from dw_claimant_detail dl
+where 
+  extract(year from dl.trans_date) = 2023 and source = 'CC'
+  and extract(month from dl.trans_date) = 8 group by dl.source, dl.trans_date
+;
+
+/*CLAIMANT_TRANS*/
+Select 
+  sum(nvl(ct.loss_paid,0)) DIR_LOSS_PAID,
+  sum(nvl(ct.alloc_expense_paid,0)) DIR_ALAE_PAID,
+  sum(nvl(ct.unalloc_expense_paid,0)) DIR_ULAE_PAID,
+  sum(case when ct.trans_type in ('Credit Salvage','Credit Subro','Credit Other') then nvl(ct.loss_paid,0) else nvl(ct.loss_reserve,0) end) DIR_LOSS_INC,
+  sum(case when ct.trans_type in ('Credit Salvage','Credit Subro','Credit Other') then nvl(ct.alloc_expense_paid,0) else nvl(ct.alloc_expense_reserve,0) end) DIR_LOSS_ALAE,
+  sum(case when ct.trans_type in ('Credit Salvage','Credit Subro','Credit Other') then nvl(ct.unalloc_expense_paid,0) else nvl(ct.unalloc_expense_reserve,0) end) DIR_ULAE_INC
+from claimant_trans ct
+where 
+  extract(year from ct.trans_date) = 2023
+  and extract(month from ct.trans_date) = 8
+;
+
+/*DW Summary*/
+Select 
+sum(nvl(mth_direct_loss_paid,0)) DIR_LOSS_PAID,
+sum(nvl(mth_direct_alloc_exp_paid,0)) DIR_ALAE_PAID,
+sum(nvl(mth_direct_unalloc_exp_paid,0)) DIR_ULAE_PAID,
+sum(nvl(mth_direct_loss_incurred,0)) DIR_LOSS_INC,
+sum(nvl(mth_direct_alloc_exp_inc,0)) DIR_ALAE_INC,
+sum(nvl(mth_direct_unalloc_exp_inc,0)) DIR_ULAE_INC,
+sum(nvl(mth_ceded_loss_paid,0)) CEDED_LOSS_PAID,
+sum(nvl(mth_ceded_expense_paid,0)) CEDED_ALAE_PAID,
+sum(nvl(mth_ceded_ULAE_paid,0)) CEDED_ULAE_PAID,
+sum(nvl(mth_ceded_loss_incurred,0)) CEDED_LOSS_INC,
+sum(nvl(mth_ceded_expense_inc,0)) CEDED_ALAE_INC,
+sum(nvl(mth_ceded_ULAE_incurred,0)) CEDED_ULAE_INC
+from dw_summary
+where year = 2023 and month = 8
+group by month
+;
+
+/*DW_Claimant_detail*/
+Select
+  dl.claimant_key,
+  sum(nvl(dl.LOSS_RESERVE,0)) DIR_LOSS_INC
+from dw_claimant_detail dl
+where 
+  extract(year from dl.trans_date) = 2023
+  and extract(month from dl.trans_date) = 8
+group by dl.claimant_key  
+order by dl.claimant_key  
+;
+
+/*CLAIMANT_TRANS*/
+Select 
+  ct.claimant,
+  sum(case when ct.trans_type in ('Credit Salvage','Credit Subro','Credit Other') then nvl(ct.loss_paid,0) else nvl(ct.loss_reserve,0) end) DIR_LOSS_INC
+from claimant_trans ct
+where 
+  extract(year from ct.trans_date) = 2023
+  and extract(month from ct.trans_date) = 8
+group by ct.claimant  
+order by ct.claimant
+;
+
+
+select * from dw_claimant where claimant_key in (3773066,3773067);--Commercial Umbrella Claim NBR 1619002
+select * from dw_claimant_detail where claimant_key in (3773066,3773067);--Opening reserve transactions are missing
+select * from claimant_trans where claimant in (3773066,3773067);
+SELECT * FROM CLAIMANT_COVERAGE WHERE CLAIMANT_COVERAGE IN (3844956,3844955);
+
+SELECT * FROM DW_CLAIM;

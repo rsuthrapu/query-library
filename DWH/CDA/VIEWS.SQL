@@ -1,12 +1,13 @@
 create or replace procedure   gp_curr_state_views (p_raw_schema_nm varchar2, p_merged_schema_nm varchar2)  as 
 
-TYPE TBL_VARCHAR IS TABLE OF VARCHAR2(100)
+TYPE TBL_VARCHAR IS TABLE OF VARCHAR2(32767)
 INDEX BY PLS_INTEGER;
 T_TABLE_NAME TBL_VARCHAR;
 T_VIEW_NAME TBL_VARCHAR;
 
-V_SQL VARCHAR2(2000);
-V_STRSQL VARCHAR2(2000);
+V_SQL VARCHAR2(32767);
+V_COLUMNS_SQL CLOB;
+
 BEGIN
 -- Select existing views from MERGE SCHEMA
 SELECT VIEW_NAME
@@ -91,15 +92,14 @@ FOR nIndx IN 1..T_TABLE_NAME.COUNT
 LOOP
     
     SELECT LISTAGG(UPPER(COLUMN_NAME), ', ') AS COLUMN_NAME
-    INTO V_STRSQL
+    INTO V_COLUMNS_SQL
     FROM all_tab_columns 
     WHERE OWNER = p_merged_schema_nm AND TABLE_NAME = T_TABLE_NAME(nIndx);
  
-  V_SQL := 'CREATE VIEW ' || p_merged_schema_nm || '.' || 'VW_' || T_TABLE_NAME(nIndx)|| '(' || 'SEQUENCING_NUM,' || V_STRSQL || ')' ||  ' AS
+   V_SQL := 'CREATE OR REPLACE VIEW ' || p_merged_schema_nm || '.' || 'VW_' || T_TABLE_NAME(nIndx)||' AS 
 				SELECT t0.* 
- 					FROM (SELECT 
-                     row_number() OVER (PARTITION BY "id" order by lpad("gwcbi___seqval_hex", 32,' || '''0''' || ') desc) as sequencing_num, 
-								t.* 
+ 					FROM (SELECT row_number() OVER (PARTITION BY "id" order by lpad("gwcbi___seqval_hex", 32,' || '''0''' || ') desc) as sequencing_num, 
+								 ' || V_COLUMNS_SQL || ' 
 			 				FROM ' || p_raw_schema_nm || '.' || T_TABLE_NAME(nIndx) || ' t) t0 
  				where t0.sequencing_num = 1' ;
     EXECUTE IMMEDIATE V_SQL;              
