@@ -35,7 +35,7 @@ SELECT CLAIM,
                     TRUNC (last_modified)   AS c_trans_date,
                     load_date               AS c_load_date,
                     'CMS' as claim_source,
-                     case when DEC_POLICY is not null then
+                     case when DEC_POLICY is null then
                       'PC'
                       else
                       'eCIG' 
@@ -60,7 +60,7 @@ SELECT CLAIM,
                     TRUNC (last_modified)   AS c_trans_date,
                     load_date               AS c_load_date,
                     'CMS' as claim_source,
-                     case when DEC_POLICY is not null then
+                     case when DEC_POLICY is null then
                       'PC'
                       else
                       'eCIG' 
