@@ -103,3 +103,14 @@ select * from claimant_trans where claimant in (3773066,3773067);
 SELECT * FROM CLAIMANT_COVERAGE WHERE CLAIMANT_COVERAGE IN (3844956,3844955);
 
 SELECT * FROM DW_CLAIM;
+
+select sum(written_prem) , trans_date,
+case when DEC_POLICY is not null then
+                      'PC'
+                      else
+                      'eCIG' 
+                      end as policy_source--,sum(case when trans_date >= (to_date(add_months(:MONTH_END,5))-1186) then written_prem else 0 end) 
+from dw_prem_detail 
+where trans_date >= '01-JAN-2024' and trans_date <= '31-JAN-2024'
+Group by policy_nbr, trans_date, case when DEC_POLICY is not null then 'PC' else 'eCIG' end
+order by trans_date , POLICY_SOURCE desc;

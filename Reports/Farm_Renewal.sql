@@ -524,7 +524,7 @@ WITH LOSS_RATIO_CC AS(
     ,0 INCURRED_LOSS_2016                        
     ,0 INCURRED_LOSS_2017                        
     ,0 INCURRED_LOSS_2018                        
-  from dw_prem_detail @echo.world --use DW_PREM_DETAIL to include historical premium for both Legacy and PC                               
+ @echo.world --use DW_PREM_DETAIL to include historical premium for both Legacy and PC                               
   where trunc(trans_date) >= (to_date(add_months(:MONTH_END,5))-1916)  --this is 3.25 years prior                       
     and business_line_name = ('Farm Auto')                          
   group by policy_nbr                     
