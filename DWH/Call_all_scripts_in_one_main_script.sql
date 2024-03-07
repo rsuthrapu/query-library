@@ -1,0 +1,39 @@
+-- Execute other SQL files
+SET SERVEROUTPUT ON;
+SET DEFINE OFF;
+
+prompt 1_pkg_Monthly_DW_Update.sql;
+@1_pkg_Monthly_DW_Update.sql;
+
+prompt 2_UPDATE_DW_CLAIMANT_TABLES_JAN.sql;
+@2_UPDATE_DW_CLAIMANT_TABLES_JAN.sql;
+
+prompt 3_UPDATE_DW_CLAIMANT_TABLES_FEB.sql;
+@3_UPDATE_DW_CLAIMANT_TABLES_FEB.sql;
+
+prompt 4_UPDATE_DW_TABLES_JAN.sql;
+@4_UPDATE_DW_TABLES_JAN.sql;
+
+prompt 5_UPDATE_DW_CLAIMANT_DETAIL_A_S_LINE_NBR_JAN.sql;
+@5_UPDATE_DW_CLAIMANT_DETAIL_A_S_LINE_NBR_JAN.sql;
+
+prompt 6_UPDATE_DW_CLAIMANT_DETAIL_A_S_LINE_NBR_FEB.sql;
+@6_UPDATE_DW_CLAIMANT_DETAIL_A_S_LINE_NBR_FEB.sql;
+
+prompt 7_UPDATE_DATE_OF_LOSS_DW_CLAIMANT.sql;
+@7_UPDATE_DATE_OF_LOSS_DW_CLAIMANT.sql;
+
+prompt 8_DELETE_RUN_DATE_JAN.sql;
+@8_DELETE_RUN_DATE_JAN.sql;
+
+prompt 9_January-Month-End-Rerun.sql;
+@9_January-Month-End-Rerun.sql;
+
+prompt 10_DELETE_RUN_DATE_FEB.sql;
+@10_DELETE_RUN_DATE_FEB.sql;
+
+prompt 11_February-Month-End-Rerun.sql;
+@11_February-Month-End-Rerun.sql;
+
+
+SET DEFINE ON;
