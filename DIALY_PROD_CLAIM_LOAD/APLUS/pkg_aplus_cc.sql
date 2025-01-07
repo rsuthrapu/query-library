@@ -1,4 +1,4 @@
-create or replace PACKAGE                   pkg_aplus AS
+create or replace PACKAGE                            pkg_aplus AS
 
 	PROCEDURE sp_Write_aplus_File
                    (v_month IN NUMBER,
@@ -8,15 +8,16 @@ create or replace PACKAGE                   pkg_aplus AS
                     V_V_CLAIM_NBR IN NUMBER
                     );
 
-	FUNCTION fn_Convert_Null_To_Space(v_char_input IN VARCHAR2)
+	FUNCTION fn_format_address(  v_po_box  IN VARCHAR2,  v_prefix   IN VARCHAR2,  v_number   IN VARCHAR2,  v_street_name IN VARCHAR2,  v_suffix IN VARCHAR2)
+    RETURN VARCHAR2;
+    FUNCTION fn_Convert_Null_To_Space(v_char_input IN VARCHAR2)
 	RETURN VARCHAR2;
 	FUNCTION fn_Replace_Unprintable (v_char_input IN VARCHAR2)
 	RETURN VARCHAR2;
 
 END pkg_aplus;
 
-
-create or replace PACKAGE BODY PKG_APLUS AS
+create or replace PACKAGE BODY                   PKG_APLUS AS
 
     PROCEDURE SP_WRITE_APLUS_FILE (
         V_MONTH                 IN NUMBER,
@@ -229,6 +230,7 @@ create or replace PACKAGE BODY PKG_APLUS AS
             POLICY_SOURCE,
             CLAIM_SOURCE,
             EXPOSURE_ID
+            
         UNION
         SELECT
             C.CLAIM,
@@ -247,7 +249,7 @@ create or replace PACKAGE BODY PKG_APLUS AS
             CLAIMANT_COVERAGE CC,
             DEC_POLICY        DP
         WHERE
-            CT.TRANS_DATE BETWEEN TO_DATE(TO_CHAR(V_MONTH)
+   CT.TRANS_DATE BETWEEN TO_DATE(TO_CHAR(V_MONTH)
                                           || '/01/'
                                           || TO_CHAR(V_YEAR),
         'MM/DD/YYYY') AND LAST_DAY(TO_DATE(TO_CHAR(V_MONTH)
@@ -259,7 +261,8 @@ create or replace PACKAGE BODY PKG_APLUS AS
                                                              || '/01/'
                                                              || TO_CHAR(V_YEAR)
                                                              || ' 11:59:59 PM',
-        'MM/DD/YYYY HH:MI:SS PM')),- 60)
+        'MM/DD/YYYY HH:MI:SS PM')),
+                                            - 60)
             AND C.CLAIM = CT.CLAIM
             AND CC.CLAIMANT_COVERAGE = CT.CLAIMANT_COVERAGE
             AND C.DEC_POLICY = DP.DEC_POLICY
@@ -278,7 +281,7 @@ create or replace PACKAGE BODY PKG_APLUS AS
             C.DEC_POLICY,
             CC.COVERAGE,
             CC.CLAIMANT--, EXPOSURE_ID
-        UNION
+        UNION 
         SELECT
             C.CLAIM,
             C.CLAIM_NBR,
@@ -558,6 +561,8 @@ create or replace PACKAGE BODY PKG_APLUS AS
         ORDER BY
             CLAIM_NBR,
             COVERAGE;
+            
+            
 
 -- PL-6986: Split up the c_dp cursor into c_dp and c_dp_pc so that we are
 -- looking for data only from the appropriate source of data depanding on where
@@ -582,6 +587,8 @@ create or replace PACKAGE BODY PKG_APLUS AS
                 DEC_POLICY = V_DEC_POLICY
             AND 'eCIG' = V_SOURCE_OF_POLICY -- ADDING THE POLICY SOURCE AND CLAIM SOURCE AS NOT TO MATCH THE CC's POLICYID with the DEC_POLICY
             AND 'CMS' = V_SOURCE_OF_CLAIM;
+            
+      
 
         CURSOR C_DP_PC IS
         SELECT
@@ -612,16 +619,27 @@ create or replace PACKAGE BODY PKG_APLUS AS
             P.POLICYNUMBER     AS POLICY_SEARCH_NBR
 --,INSURED_ADDRESS_DETAILS
             ,
-            NULL               AS INSURED_ADDR_NBR,
-            CA.ADDRESSLINE1
+            CASE WHEN CA.ADDRESSLINE1 IS NULL
+            THEN 
+                DP.INSURED_ADDR_NBR               
+                ELSE NULL
+            END AS INSURED_ADDR_NBR,
+            CASE WHEN CA.ADDRESSLINE1 IS NULL
+            THEN CA.ADDRESSLINE1
             || ' '
-            || CA.ADDRESSLINE2 AS INSURED_ADDR_STREET_NAME,
+            || CA.ADDRESSLINE2
+            ELSE 
+            FN_FORMAT_ADDRESS('',DP.INSURED_PREFIX ,'',DP.INSURED_STREET_NAME , DP.INSURED_SUFFIX) END AS INSURED_ADDR_STREET_NAME,                
             NULL               AS INSURED_ADDR_STREET_TYPE,
             NULL               AS INSURED_ADDR_APT_NBR,
-            CA.CITY            AS INSURED_ADDR_CITY,
-            TLST.TYPECODE      AS INSURED_ADDR_STATE,
-            CA.POSTALCODE      AS INSURED_ADDR_ZIPCODE,
-            NULL               AS INSURED_ADDR_PO_BOX
+            NVL (CA.CITY, DP.INSURED_CITY) AS INSURED_ADDR_CITY,
+            NVL (TLST.TYPECODE, DP.INSURED_STATE) AS INSURED_ADDR_STATE,
+            NVL (CA.POSTALCODE, DP.INSURED_ZIPCODE) AS INSURED_ADDR_ZIPCODE,
+            CASE WHEN CA.ADDRESSLINE1 IS NULL
+            THEN 
+                DP.INSURED_PO             
+                ELSE NULL
+            END AS INSURED_ADDR_PO_BOX
 --,TLCT.NAME AS SUBTYPE_NAME
             ,
             TLUCT.NAME         AS WRITING_COMPANY
@@ -657,9 +675,9 @@ create or replace PACKAGE BODY PKG_APLUS AS
         FROM
                  CCADMIN.CC_CLAIM@ECIG_TO_GWCC_PRD_LINK C
             INNER JOIN CCADMIN.CC_POLICY@ECIG_TO_GWCC_PRD_LINK                    P ON P.ID = C.POLICYID
-            INNER JOIN CCADMIN.CC_CONTACT@ECIG_TO_GWCC_PRD_LINK                   CT ON CT.ID = C.INSUREDDENORMID
-            INNER JOIN CCADMIN.CC_ADDRESS@ECIG_TO_GWCC_PRD_LINK                   CA ON CA.ID = CT.PRIMARYADDRESSID
-            INNER JOIN CCADMIN.CCTL_CONTACT@ECIG_TO_GWCC_PRD_LINK                 TLCT ON TLCT.ID = CT.SUBTYPE
+            LEFT JOIN CCADMIN.CC_CONTACT@ECIG_TO_GWCC_PRD_LINK                   CT ON CT.ID = C.INSUREDDENORMID
+            LEFT JOIN CCADMIN.CC_ADDRESS@ECIG_TO_GWCC_PRD_LINK                   CA ON CA.ID = CT.PRIMARYADDRESSID
+            LEFT JOIN CCADMIN.CCTL_CONTACT@ECIG_TO_GWCC_PRD_LINK                 TLCT ON TLCT.ID = CT.SUBTYPE
             LEFT OUTER JOIN CCADMIN.CCTL_UNDERWRITINGCOMPANYTYPE@ECIG_TO_GWCC_PRD_LINK TLUCT ON P.UNDERWRITINGCO = TLUCT.ID
                                                                                                 AND TLUCT.RETIRED = 0
             LEFT OUTER JOIN CCADMIN.CCTL_POLICYTYPE@ECIG_TO_GWCC_PRD_LINK              TLPTY ON TLPTY.ID = P.POLICYTYPE
@@ -675,7 +693,8 @@ create or replace PACKAGE BODY PKG_APLUS AS
                    AND 'PolicyCenter' = V_SOURCE_OF_POLICY ) )
             AND 'CC' = V_SOURCE_OF_CLAIM;
 
-        R_DP                          C_DP%ROWTYPE;
+        R_DP                          C_DP%ROWTYPE;    
+        
 
 -- 8/18/05 Issue 6424 GN: replace insureds ssn with zeros
         CURSOR C_POLICYHOLDER IS
@@ -1621,10 +1640,10 @@ create or replace PACKAGE BODY PKG_APLUS AS
                 THEN
        -- DBMS_OUTPUT.PUT_LINE ( ' Assigning to rdp = ' ||v_source_of_policy ||' ' || v_source_of_claim|| ': ' || v_claim_nbr || ' - ' || v_policy);
 
-                    OPEN C_DP;
+                    OPEN C_DP;                                     
                     FETCH C_DP INTO R_DP;
                     IF C_DP%NOTFOUND THEN
-            --  DBMS_OUTPUT.PUT_LINE ( 'c_dp NOTFOUND ' || v_source_of_policy ||'-' || v_source_of_claim || ' r_dp = ' || r_dp.business_name ||' ' || r_dp.insured_addr_nbr|| ': ' || r_dp.insured_addr_street_name || ' - ' || r_dp.insured_addr_city);
+              -- DBMS_OUTPUT.PUT_LINE ( 'c_dp NOTFOUND ' || v_source_of_policy ||'-' || v_source_of_claim || ' r_dp = ' || r_dp.business_name ||' ' || r_dp.insured_addr_nbr|| ': ' || r_dp.insured_addr_street_name || ' - ' || r_dp.insured_addr_city);
 
                         R_DP := NULL;
                     END IF;
@@ -1649,7 +1668,7 @@ create or replace PACKAGE BODY PKG_APLUS AS
                     OPEN C_DP_CC_POLICIES;
                     FETCH C_DP_CC_POLICIES INTO R_DP;
                     IF C_DP_CC_POLICIES%NOTFOUND THEN
-             -- DBMS_OUTPUT.PUT_LINE ( 'c_dp_CC_policies NOTFOUND ' || v_source_of_policy ||'-' || v_source_of_claim || ' r_dp = ' || r_dp.business_name ||' ' || r_dp.insured_addr_nbr|| ': ' || r_dp.insured_addr_street_name || ' - ' || r_dp.insured_addr_city);
+              DBMS_OUTPUT.PUT_LINE ( 'c_dp_CC_policies NOTFOUND ' || v_source_of_policy ||'-' || v_source_of_claim || ' r_dp = ' || r_dp.business_name ||' ' || r_dp.insured_addr_nbr|| ': ' || r_dp.insured_addr_street_name || ' - ' || r_dp.insured_addr_city);
 
                         R_DP := NULL;
                     END IF;
@@ -1946,7 +1965,10 @@ create or replace PACKAGE BODY PKG_APLUS AS
 
    -- DBMS_OUTPUT.PUT_LINE ( ' BEFORE INSERTING Assigning to rdp = ' || r_dba.doing_business_as||' - ' ||v_source_of_policy ||' ' || v_source_of_claim|| ': ' || v_claim_nbr || ' - ' || v_policy);
   --  DBMS_OUTPUT.PUT_LINE ( ' BEFORE INSERTING r_policyholder1 = ' || r_policyholder1.first_name||' - ' ||r_policyholder1.last_name ||' ' || r_policyholder1.middle_name|| ': ' || v_claim_nbr || ' - ' || v_policy);
-
+  
+   DBMS_OUTPUT.PUT_LINE ( ' BEFORE INSERTING Assigning to rdp = ' || r_dp.policy_search_nbr ||
+                                 ' - '  || r_dp.business_name ||' ' || r_dp.insured_addr_nbr|| ': ' || r_dp.insured_addr_street_name || ' - ' || r_dp.insured_addr_city);
+                                 
 -- Create the APLUS output record.
 -----------------------------------------------------------------
 --START APLUS RECORD
@@ -1954,7 +1976,7 @@ create or replace PACKAGE BODY PKG_APLUS AS
 		        --'I' ||                                              --01 byte  001-001
                  RPAD(NVL(V_RECORD_TYPE, ' '), 01)
                             ||                 --01 bytes 001-001
-                             RPAD(NVL(R_DP.BUSINESS_NAME, ' '), 40)
+                            RPAD(NVL(R_DP.BUSINESS_NAME, ' '), 40)
                             ||            --40 bytes 002-041
                              RPAD(NVL(R_DBA.DOING_BUSINESS_AS, ' '), 40)
                             ||       --40 bytes 042-081
@@ -2349,8 +2371,53 @@ create or replace PACKAGE BODY PKG_APLUS AS
             DBMS_OUTPUT.PUT_LINE('Inner exception: ' || SQLERRM);
             RAISE_APPLICATION_ERROR(-20026, 'Unknown error IN sp_Write_aplus_File');
     END SP_WRITE_APLUS_FILE;
+    
+FUNCTION FN_FORMAT_ADDRESS
+(
+  v_po_box  IN VARCHAR2,
+  v_prefix   IN VARCHAR2,
+  v_number   IN VARCHAR2,
+  v_street_name IN VARCHAR2,
+  v_suffix IN VARCHAR2
+)
+RETURN VARCHAR2 IS
+  v_name VARCHAR2(200);
+BEGIN
+ IF (LENGTH(TRIM(v_po_box))>0)  THEN
+    v_name:=v_name ||  v_po_box;
+ END IF;
+  IF (LENGTH(TRIM(v_prefix))>0)  THEN
+   IF LENGTH(v_name)>0 THEN
+     v_name:=v_name || ', ' || v_prefix;
+   ELSE
+     v_name:=v_name  || v_prefix;
+   END IF;
+  END IF;
+  IF (LENGTH(TRIM(v_number))>0)  THEN
+   IF LENGTH(v_name)>0 THEN
+     v_name:=v_name || ', ' || v_number;
+   ELSE
+     v_name:=v_name  || v_number;
+   END IF;
+  END IF;
+ IF (LENGTH(TRIM(v_street_name))>0)  THEN
+   IF LENGTH(v_name)>0 THEN
+     v_name:=v_name || ', ' || v_street_name;
+   ELSE
+     v_name:=v_name  || v_street_name;
+   END IF;
+ END IF;
+ IF (LENGTH(TRIM(v_suffix))>0)  THEN
+  IF LENGTH(v_name)>0 THEN
+    v_name:=v_name || ', ' || v_suffix;
+  ELSE
+    v_name:=v_name  || v_suffix;
+  END IF;
+ END IF;
+  RETURN v_name;
+END FN_FORMAT_ADDRESS;
 
-    FUNCTION FN_CONVERT_NULL_TO_SPACE (
+FUNCTION FN_CONVERT_NULL_TO_SPACE (
         V_CHAR_INPUT IN VARCHAR2
     ) RETURN VARCHAR2 IS
         V_CHAR_OUT VARCHAR2(100);
