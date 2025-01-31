@@ -1,0 +1,102 @@
+---------------------  STEP 1-----------------------------------------
+DECLARE
+  v_start_date DATE;
+  v_end_date DATE;
+BEGIN
+  v_start_date := TRUNC(SYSDATE, 'MM');  
+  v_end_date := SYSDATE;
+  
+  WHOUSE.PKG_DAILY_CC_DW_UPDATE.SP_CCST_DW_CLAIMANT(v_start_date, v_end_date);
+END;
+/
+Show errors;
+---------------------  STEP 2-----------------------------------------
+
+DECLARE
+  v_start_date DATE;
+  v_end_date DATE;
+BEGIN
+  v_start_date := TRUNC(SYSDATE, 'MM');  
+  v_end_date := SYSDATE;
+  
+  WHOUSE.PKG_DAILY_DW_UPDATE.up_dw_daily_tables(v_start_date, v_end_date);
+END;
+/
+Show errors;
+
+---------------------  STEP 3-----------------------------------------
+
+UPDATE dw_claimant dwc
+SET
+ dwc.date_of_loss = (SELECT clm.lossdate FROM ccadmin.cc_claim@GW_PRD_LINK clm
+                     WHERE dwc.claim_key = clm.id)
+WHERE EXISTS (
+ SELECT 1
+ FROM ccadmin.cc_claim@GW_PRD_LINK clm
+ WHERE dwc.claim_key = clm.id
+   AND dwc.source = 'CC'
+   AND dwc.date_of_loss <> clm.lossdate)
+   ;
+
+   ----- ANY missing ASL data fixes-----------------------------------
+
+
+   ----------------MONTH END MATCH --------------------------
+   DECLARE
+  v_start_date DATE;
+  v_end_date DATE;
+BEGIN
+  v_start_date := TRUNC(SYSDATE-2, 'MM');  
+  v_end_date := SYSDATE-2;
+  
+ --  DBMS_OUTPUT.PUT_LINE('DATES' || v_start_date || v_end_date);
+  WHOUSE.PKG_DAILY_DW_UPDATE.up_dw_daily_tables(v_start_date, v_end_date);
+END;
+/
+Show errors;
+
+-----------------------------MONTH END RERUN----------------------------------------------
+
+DECLARE
+  V_CURRENT_DATE DATE := SYSDATE -2;
+  V_START_DATE DATE;
+  V_END_DATE DATE;
+  V_MONTH NUMBER;
+  V_YEAR NUMBER;
+BEGIN
+  -- Extract month and year
+  V_MONTH := EXTRACT(MONTH FROM V_CURRENT_DATE);
+  V_YEAR := EXTRACT(YEAR FROM V_CURRENT_DATE);
+
+  -- Calculate start and end dates of the current month
+  V_START_DATE := TRUNC(V_CURRENT_DATE, 'MM'); 
+  V_END_DATE := LAST_DAY(V_CURRENT_DATE);      
+
+ Begin
+        DBMS_OUTPUT.PUT_LINE('V_START_DATE = ' ||V_START_DATE);
+        DBMS_OUTPUT.PUT_LINE('V_END_DATE = ' ||V_END_DATE);
+        
+        INSERT INTO run_date ( 
+            run_date, procedure_name,
+            start_date, end_date,
+            operator_id, start_time, end_time)
+        VALUES ( seq_run_date.NEXTVAL, 'Pkg_Gwpc_Legacy.sp_insert_rundate',
+            V_START_DATE, V_END_DATE,
+            USER, SYSDATE, sysdate);
+        
+        commit;
+    End;     
+    
+    --SP_POLICY_AT_MONTH_END;
+    PKG_MONTHLY_DW_UPDATE.UP_MONTHLY_SUMMARY(V_MONTH,V_YEAR);
+    PKG_PREMIUM_CEDING.SP_CEDE_PREMIUMS(V_MONTH,V_YEAR);
+    PKG_POPULATE_DW_SUMMARY.CREATE_NEW_SUMMARY(V_MONTH,V_YEAR);
+    PKG_UP_DW.SP_UP_DW_MAIN(V_MONTH,V_YEAR);
+    SP_POPULATE_MONTHLY_CLAIM(V_MONTH,V_YEAR);
+    SP_POPULATE_MONTHLY_CLAIMANT(V_MONTH,V_YEAR);
+    SP_POPULATE_MONTHLY_COV(V_MONTH,V_YEAR);
+    SP_POPULATE_DW_INCURRED_LOSS;
+
+END;
+/
+Show errors;
