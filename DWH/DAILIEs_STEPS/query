@@ -41,21 +41,10 @@ WHERE EXISTS (
    ----- ANY missing ASL data fixes-----------------------------------
 
 
-   ----------------MONTH END MATCH --------------------------
-   DECLARE
-  v_start_date DATE;
-  v_end_date DATE;
-BEGIN
-  v_start_date := TRUNC(SYSDATE-2, 'MM');  
-  v_end_date := SYSDATE-2;
-  
- --  DBMS_OUTPUT.PUT_LINE('DATES' || v_start_date || v_end_date);
-  WHOUSE.PKG_DAILY_DW_UPDATE.up_dw_daily_tables(v_start_date, v_end_date);
-END;
-/
-Show errors;
 
------------------------------MONTH END RERUN----------------------------------------------
+-----------------------------MONTH END RERUN  ----------------------------------------------
+
+--  V_CURRENT_DATE SHOULD BE THE LAST DAY OF PREVIOUS MONTH
 
 DECLARE
   V_CURRENT_DATE DATE := SYSDATE -2;
