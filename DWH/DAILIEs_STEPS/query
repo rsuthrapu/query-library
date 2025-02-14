@@ -6,6 +6,11 @@ BEGIN
   v_start_date := TRUNC(SYSDATE, 'MM');  
   v_end_date := SYSDATE;
   
+  -- Display the information
+ -- DBMS_OUTPUT.PUT_LINE('Start Date of Month: ' || TO_CHAR(V_START_DATE, 'MM/DD/YYYY'));
+  --DBMS_OUTPUT.PUT_LINE('End Date of Month: ' || TO_CHAR(V_END_DATE, 'MM/DD/YYYY'));
+
+
   WHOUSE.PKG_DAILY_CC_DW_UPDATE.SP_CCST_DW_CLAIMANT(v_start_date, v_end_date);
 END;
 /
