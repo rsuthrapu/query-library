@@ -1,0 +1,1530 @@
+create or replace PACKAGE          "PKG_MONTHLY_DW_UPDATE" AS
+
+PROCEDURE Up_Monthly_Summary(v_Month Number,v_Year Number);
+
+PROCEDURE Up_Monthly_Prems(v_Month Number,v_Year Number);
+
+PROCEDURE Get_Required_Value
+      (v_writing_company    IN  dw_monthly_summary.writing_company%TYPE,
+       v_branch_nbr         IN  dw_monthly_summary.branch_nbr%TYPE,
+       v_agency_code        IN  dw_monthly_summary.agency_code%TYPE,
+       v_dept_nbr           IN  dw_monthly_summary.dept_nbr%TYPE,
+       v_dept_desc          IN  dw_monthly_summary.dept_desc%TYPE,
+       v_major_line_name    IN  dw_monthly_summary.major_line_name%TYPE,
+       v_business_line_name IN  dw_monthly_summary.business_line_name%TYPE,
+       v_line_nbr           IN  dw_monthly_summary.line_nbr%TYPE,
+       v_a_s_line_nbr       IN  dw_monthly_summary.a_s_line_nbr%TYPE,
+       v_a_s_line_desc      IN  dw_monthly_summary.a_s_line_desc%TYPE,
+       v_contract_nbr       IN  dw_monthly_summary.contract_nbr%TYPE,
+       v_Month              IN  NUMBER,
+       v_Year               IN  NUMBER,
+       v_amount_type        IN  dw_monthly_summary.amount_type%TYPE,
+       v_month_amount       OUT dw_monthly_summary.month_amount%TYPE);
+
+PROCEDURE commit_when_necessary(p_commit_count IN OUT NUMBER);
+FUNCTION FN_DEPT_NBR_DW_PREM_DETAIL (p_policynumber IN VARCHAR2,p_policy_eff_date IN DATE) RETURN NUMBER;
+FUNCTION FN_DEPT_DESC_DW_PREM_DETAIL (p_policynumber IN VARCHAR2,p_policy_eff_date  IN DATE) RETURN VARCHAR2;
+FUNCTION direct_os_loss (p_trans_type VARCHAR2, p_reserve FLOAT, p_paid FLOAT, p_source VARCHAR2) RETURN FLOAT;
+
+END pkg_Monthly_DW_Update;
+
+create or replace PACKAGE BODY                                    pkg_Monthly_DW_Update AS
+
+PROCEDURE Up_Monthly_Summary(v_Month Number,v_Year Number) Is
+
+   TYPE tp_branch_table_type IS TABLE OF branch%ROWTYPE
+         INDEX BY BINARY_INTEGER;
+
+   TYPE tp_agency_table_type IS TABLE OF agency%ROWTYPE
+         INDEX BY BINARY_INTEGER;
+
+		V_Dw_Monthly_Summary	DW_Monthly_Summary.DW_Monthly_Summary%Type;
+		V_Writing_Company	DW_Monthly_Summary.Writing_Company%Type;
+		V_Branch_Nbr		DW_Monthly_Summary.Branch_Nbr%Type;
+		V_Branch_Name		DW_Monthly_Summary.Branch_Name%Type;
+		V_Agency_Code		DW_Monthly_Summary.Agency_Code%Type;
+		V_Agency_Name		DW_Monthly_Summary.Agency_Name%Type;
+		V_Agency_State		DW_Monthly_Summary.Agency_State%Type;
+		V_Dept_Nbr		DW_Monthly_Summary.Dept_Nbr%Type;
+		V_Dept_Desc		DW_Monthly_Summary.Dept_Desc%Type;
+		V_Line_Nbr		DW_Monthly_Summary.Line_Nbr%Type;
+		V_Coverage_Line_Desc	DW_Monthly_Summary.Coverage_Line_Desc%Type;
+		V_A_S_Line_Nbr		DW_Monthly_Summary.A_S_Line_Nbr%Type;
+		V_A_S_Line_Desc		DW_Monthly_Summary.A_S_Line_Desc%Type;
+		V_Major_Line_Name	DW_Monthly_Summary.Major_Line_Name%Type;
+		V_Business_Line_Name	DW_Monthly_Summary.Business_Line_Name%Type;
+		V_Contract_Nbr			DW_Monthly_Summary.Contract_Nbr%Type;
+		V_Trans_Type			DW_Claimant_Detail.Trans_Type%Type;
+		V_Amount_Type		DW_Monthly_Summary.Amount_Type%Type;
+		V_Month_Amount		DW_Monthly_Summary.Month_Amount%Type;
+
+
+		V_Prev_Month		Number;
+		V_Prev_Year			Number;
+		V_Sum_Loss_Paid			  FLOAT(126);
+		V_Sum_Diff_Loss			  FLOAT(126);
+		V_Sum_Alloc_Expense_Paid	  FLOAT(126);
+		V_Sum_Unalloc_Expense_Paid	  FLOAT(126);
+		V_Sum_Diff_Alloc_Expense	  FLOAT(126);
+		V_Sum_Diff_Unalloc_Expense	  FLOAT(126);
+		V_Sum_Loss_reserve		  FLOAT(126);
+		V_Sum_Alloc_Expense_Reserve	  FLOAT(126);
+		V_Sum_Unalloc_Expense_Reserve	  FLOAT(126);
+		V_Sum_Ceded_Loss_Paid		  FLOAT(126);
+		V_Sum_Ceded_Diff_Loss		  FLOAT(126);
+		V_Sum_Ceded_Expense_Paid	  FLOAT(126);
+		V_Sum_Ceded_Diff_Expense	  FLOAT(126);
+		V_Sum_Ceded_Loss_reserve	  FLOAT(126);
+		V_Sum_Ceded_Expense_Reserve	  FLOAT(126);
+		V_Sum_Salv_Subro		  	  FLOAT(126);
+		V_Sum_Ceded_Salv_Subro		  FLOAT(126);
+		V_Sum_Ceded_Ulae_Paid		  FLOAT(126);
+		V_Sum_Ceded_Ulae_Reserve	  FLOAT(126);
+		v_Sum_Ceded_Diff_Ulae		  FLOAT(126);
+
+		v_Count 			  	Number;
+        v_commit_count          NUMBER := 0;
+		v_Month_Begin			Date;
+		v_Month_End			  	Date;
+		v_run_date				  NUMBER;
+
+-- NK@TC 07/29/1999
+        v_reinsurance_contract   dw_prem_detail.reinsurance_contract%type;
+        v_used_percent          float;
+        v_prem_ceding_rate      float;
+        v_reins_contract_comm   reinsurance_contract.commission%type;
+
+   t_branch                       tp_branch_table_type;
+   i_branch                       NUMBER;
+
+   t_agency                       tp_agency_table_type;
+   i_agency                       NUMBER;
+
+   CURSOR c_branch IS
+      SELECT *
+      FROM   branch;
+
+   CURSOR c_agency IS
+      SELECT *
+      FROM   agency;
+
+   CURSOR c_dw_monthly_summary IS
+      SELECT /*+ RULE */ *
+      FROM   dw_monthly_summary
+      WHERE  month = v_month
+      AND    year = v_year;
+
+	Cursor cur_DwClaimantDetail Is
+	SELECT		/*+ RULE */
+		C.Writing_Company,
+		C.Policy_Branch_Nbr,
+		C.Agency_Code,
+		CD.Dept_Nbr,
+		CD.Dept_Desc,
+		CD.Line_Nbr,
+		CD.Coverage_Line_Desc,
+		CD.A_S_Line_Nbr,
+		CD.A_S_Line_Desc,
+		CD.Major_Line_Name,
+		CD.Business_line_name,
+		NVL(CD.Treaty_Contract_Nbr,0),
+		Sum(NVL(CD.Loss_Paid, 0)),
+		Sum(NVL(CD.Alloc_Expense_Paid, 0)),
+		Sum(NVL(CD.UnAlloc_Expense_Paid, 0)),
+		Sum(NVL(CD.Loss_Reserve, 0)),
+		Sum(NVL(CD.Alloc_Expense_Reserve, 0)),
+		Sum(NVL(CD.UnAlloc_Expense_Reserve, 0)),
+		Sum(NVL(CD.Ceded_Loss_Paid, 0)),
+		Sum(NVL(CD.Ceded_Expense_Paid, 0)),
+		Sum(NVL(CD.Ceded_Loss_Reserve, 0) + NVL(CD.Ceded_Loss_Paid, 0)),
+		Sum(NVL(CD.Ceded_Expense_Reserve, 0) + NVL(CD.Ceded_Expense_Paid, 0)),
+		Sum(NVL(CD.Ceded_Ulae_Paid, 0) + NVL(CD.Ceded_Ulae_Reserve, 0)),
+		Sum(NVL(CD.Ceded_Ulae_Paid, 0))
+	FROM
+		DW_Claimant_Detail CD,DW_Claimant C
+	WHERE
+     	CD.Trans_Date >= v_Month_Begin AND
+     	CD.Trans_Date <= v_Month_End And
+		CD.Claimant_Key = C.Claimant_Key And
+		CD.Claim_Key = C.Claim_Key
+
+	GROUP BY
+		C.Writing_Company,
+		C.Policy_Branch_Nbr,
+		C.Agency_Code,
+		CD.Dept_Nbr,
+		CD.Dept_Desc,
+		CD.Line_Nbr,
+		CD.Coverage_Line_Desc,
+		CD.A_S_Line_Nbr,
+		CD.A_S_Line_Desc,
+		CD.Major_Line_Name,
+		CD.Business_line_name,
+		CD.Treaty_Contract_Nbr;
+
+Cursor cur_Dw_OS_ClaimantDetail Is
+	SELECT	/*+ RULE */
+		CL.Writing_Company,
+		CL.Policy_Branch_Nbr,
+		CL.Agency_Code,
+		CD.Dept_Nbr,
+		CD.Dept_Desc,
+		CD.Line_Nbr,
+		CD.Coverage_Line_Desc,
+		CD.A_S_Line_Nbr,
+		CD.A_S_Line_Desc,
+		CD.Major_Line_Name,
+		CD.Business_line_name,
+		NVL(CD.Treaty_Contract_Nbr,0),
+		SUM(direct_os_loss(cd.trans_type, cd.loss_reserve, cd.loss_paid, cd.source)),
+		SUM(direct_os_loss(cd.trans_type, cd.alloc_expense_reserve,
+              cd.alloc_expense_paid, cd.source)),
+		SUM(direct_os_loss(cd.trans_type, cd.unalloc_expense_reserve,
+              cd.unalloc_expense_paid, cd.source)),
+		Sum(NVL(CD.Ceded_Loss_Reserve, 0)),
+		Sum(NVL(CD.Ceded_Expense_Reserve, 0)),
+		Sum(NVL(CD.Ceded_ulae_Reserve, 0))
+	FROM
+		DW_Claimant_Detail CD,DW_Claimant CL
+	WHERE
+		CD.Trans_Date <= v_Month_End AND
+		CD.Claimant_Key = CL.Claimant_Key And
+		CD.Claim_Key = CL.Claim_Key
+	GROUP BY
+		CL.Writing_Company,
+		CL.Policy_Branch_Nbr,
+		CL.Agency_Code,
+		CD.Dept_Nbr,
+		CD.Dept_Desc,
+		CD.Line_Nbr,
+		CD.Coverage_Line_Desc,
+		CD.A_S_Line_Nbr,
+		CD.A_S_Line_Desc,
+		CD.Major_Line_Name,
+		CD.Business_line_name,
+		CD.Treaty_Contract_Nbr;
+
+	Cursor cur_SumSalvSubro Is
+	SELECT
+		C.Writing_Company,
+		C.Policy_Branch_Nbr,
+		C.Agency_Code,
+		CD.Dept_Nbr,
+		CD.Dept_Desc,
+		CD.Line_Nbr,
+		CD.Coverage_Line_Desc,
+		CD.A_S_Line_Nbr,
+		CD.A_S_Line_Desc,
+		CD.Major_Line_Name,
+		CD.Business_line_name,
+		nvl(CD.Treaty_Contract_Nbr,0),
+		Sum(NVL(CD.Loss_Paid,0)),
+		Sum(NVL(CD.Ceded_Loss_Paid,0))
+
+	FROM
+		DW_Claimant_Detail CD,DW_Claimant C
+	WHERE
+     	CD.Trans_Date >= v_Month_Begin AND
+     	CD.Trans_Date <= v_Month_End And
+		CD.Claimant_Key = C.Claimant_Key And
+		CD.Claim_Key = C.Claim_Key And
+		(Trans_Type = 'Credit Salvage' OR
+		 Trans_Type = 'Credit Subro')
+	GROUP BY
+		C.Writing_Company,
+		C.Policy_Branch_Nbr,
+		C.Agency_Code,
+		CD.Dept_Nbr,
+		CD.Dept_Desc,
+		CD.Line_Nbr,
+		CD.Coverage_Line_Desc,
+		CD.A_S_Line_Nbr,
+		CD.A_S_Line_Desc,
+		CD.Major_Line_Name,
+		CD.Business_line_name,
+		CD.Treaty_Contract_Nbr;
+
+BEGIN
+
+-- Note: up_monthly_prems is called at the end of this procedure
+
+    v_Month_Begin := TO_DATE(TO_CHAR(v_Month) || '/01/' || TO_CHAR(v_Year),
+          'MM/DD/YYYY');
+
+    v_Month_End := LAST_DAY(TO_DATE (TO_CHAR(v_Month) || '/01/' ||
+          TO_CHAR(v_Year) || ' 11:59:59 PM', 'MM/DD/YYYY HH:MI:SS PM'));
+
+	IF V_Month = 1 THEN
+		V_Prev_Month := 12;
+		V_Prev_Year := V_Year - 1;
+	ELSE
+		V_Prev_Month := V_Month  - 1;
+		V_Prev_Year := V_Year;
+	END IF;
+
+   t_branch.DELETE;
+
+   FOR v_branch IN c_branch LOOP
+
+      i_branch := v_branch.branch_nbr;
+      t_branch(i_branch) := v_branch;
+
+   END LOOP;
+
+   t_agency.DELETE;
+
+   FOR v_agency IN c_agency LOOP
+
+      i_agency := v_agency.agency_code;
+      t_agency(i_agency) := v_agency;
+
+   END LOOP;
+
+	SELECT seq_run_date.NEXTVAL
+	INTO v_run_date
+	FROM dual;
+
+	INSERT INTO run_date (  run_date,
+				procedure_name,
+				start_date,
+				end_date,
+				operator_id,
+				start_time)
+			VALUES ( v_run_date,
+				'Up_Monthly_Summary',
+				v_Month_Begin,
+				v_Month_End,
+				USER,
+				SYSDATE);
+	COMMIT;
+
+   v_commit_count := 0;
+
+   FOR v_dw_monthly_summary IN c_dw_monthly_summary LOOP
+
+      DELETE FROM dw_monthly_summary
+      WHERE  dw_monthly_summary = v_dw_monthly_summary.dw_monthly_summary;
+
+      commit_when_necessary(v_commit_count);
+
+   END LOOP;
+
+   COMMIT;
+
+	v_Count := 1;
+
+	OPEN cur_DwClaimantDetail;
+	Loop
+		FETCH cur_DwClaimantDetail INTO
+		V_Writing_Company,
+		V_Branch_Nbr,
+		V_Agency_Code,
+		V_Dept_Nbr,
+		V_Dept_Desc,
+		V_Line_Nbr,
+		V_Coverage_Line_Desc,
+		V_A_S_Line_Nbr,
+		V_A_S_Line_Desc,
+		V_Major_line_name,
+		V_Business_line_name,
+		V_Contract_Nbr,
+		V_Sum_Loss_Paid,
+		V_Sum_Alloc_Expense_Paid,
+		V_Sum_Unalloc_Expense_Paid,
+		V_Sum_Loss_reserve,
+		V_Sum_Alloc_Expense_reserve,
+		V_Sum_Unalloc_Expense_reserve,
+		V_Sum_Ceded_Loss_Paid,
+		V_Sum_Ceded_Expense_Paid,
+		V_Sum_Ceded_Loss_reserve,
+		V_Sum_Ceded_Expense_reserve,
+		v_Sum_Ceded_Ulae_Reserve,
+		V_Sum_Ceded_ULAE_Paid;
+
+
+		EXIT WHEN cur_DwClaimantDetail%NOTFOUND;
+BEGIN
+
+	If v_Count >= 13 Then
+		v_Count := 1;
+	End If;
+
+	While v_Count < 13 Loop
+
+
+	DBMS_OUTPUT.PUT_LINE('COUNT TEST	' || V_cOUNT);
+
+
+        If v_Count = 1 Then
+		    v_Amount_Type := 'Direct Loss Paid';
+		    V_Month_Amount := V_Sum_Loss_Paid;
+		ElsIf v_Count = 2 Then
+			v_Amount_Type := 'Direct Alloc Expense Paid';
+			V_Month_Amount := V_Sum_Alloc_Expense_Paid;
+		ElsIf v_Count = 3 Then
+			v_Amount_Type := 'Direct Unalloc Expense Paid';
+			V_Month_Amount := V_Sum_Unalloc_Expense_Paid;
+		ElsIf v_Count = 4 Then
+			v_Amount_Type := 'Direct Loss Incurred';
+			V_Month_Amount := V_Sum_Loss_reserve;
+		ElsIf v_Count = 5 Then
+			v_Amount_Type := 'Direct Alloc Exp Incurred';
+			V_Month_Amount := V_Sum_Alloc_Expense_reserve;
+		ElsIf v_Count = 6 Then
+			v_Amount_Type := 'Direct Unalloc Exp Incurred';
+			V_Month_Amount := V_Sum_Unalloc_Expense_reserve;
+	    ElsIf v_Count = 7 Then
+		    v_Amount_Type := 'Ceded Loss Paid';
+		    V_Month_Amount := V_Sum_Ceded_Loss_Paid;
+		ElsIf v_Count = 8 Then
+			v_Amount_Type := 'Ceded Expense Paid';
+			V_Month_Amount := V_Sum_Ceded_Expense_Paid;
+		ElsIf v_Count = 9 Then
+			v_Amount_Type := 'Ceded Loss incurred';
+			V_Month_Amount := V_Sum_Ceded_Loss_reserve;
+		ElsIf v_Count = 10 Then
+			v_Amount_Type := 'Ceded Expense Incurred';
+			V_Month_Amount := V_Sum_Ceded_Expense_reserve;
+-- G.N march 9/1999
+		ElsIf v_Count = 11 Then
+			v_Amount_Type := 'Ceded ULAE Incurred';
+			v_Month_Amount := v_Sum_Ceded_ULAE_Reserve;
+		ElsIf v_Count = 12 Then
+			v_Amount_Type := 'Ceded ULAE Paid';
+			v_Month_Amount := v_Sum_Ceded_ULAE_Paid;
+		End If;
+
+	DBMS_OUTPUT.PUT_LINE('Inserting claimant detail 	' || V_count);
+
+   IF v_month_amount != 0 THEN
+
+   BEGIN
+      v_branch_name := t_branch(v_branch_nbr).branch_name;
+
+   EXCEPTION
+
+      WHEN NO_DATA_FOUND THEN
+         v_branch_name := '';
+      WHEN others THEN
+         v_branch_name := '';
+   END;
+
+   BEGIN
+
+      v_agency_name := t_agency(v_agency_code).agency_name;
+      v_agency_state := t_agency(v_agency_code).domicile_state;
+
+   EXCEPTION
+
+      WHEN NO_DATA_FOUND THEN
+         v_agency_name := '';
+         v_agency_state := '';
+       WHEN others THEN
+         v_agency_name := '';
+         v_agency_state := '';
+   END;
+
+
+	INSERT INTO DW_Monthly_Summary
+		(
+		Dw_Monthly_Summary,
+		Writing_Company,
+		Branch_Nbr,
+		Branch_Name,
+		Agency_Code,
+		Agency_Name,
+		Agency_State,
+		Dept_Nbr,
+		Dept_Desc,
+		Line_Nbr,
+		Coverage_Line_Desc,
+		A_S_Line_Nbr,
+		A_S_Line_Desc,
+		Major_Line_Name,
+		Business_line_name,
+		Contract_Nbr,
+		Month,
+		Year,
+		Amount_Type,
+		Month_Amount)
+	Values
+		(Seq_Dw_Monthly_Summary.NextVal,
+		V_Writing_Company,
+		V_Branch_Nbr,
+		V_Branch_Name,
+		V_Agency_Code,
+		V_Agency_Name,
+		V_Agency_State,
+		V_Dept_Nbr,
+		V_Dept_Desc,
+		V_Line_Nbr,
+		V_Coverage_Line_Desc,
+		V_A_S_Line_Nbr,
+		V_A_S_Line_Desc,
+		V_Major_line_name,
+		V_Business_line_name,
+		V_Contract_Nbr,
+		V_Month,
+		V_Year,
+		V_Amount_Type,
+		V_Month_Amount);
+
+        commit_when_necessary(v_commit_count);
+
+   END IF;
+
+		v_Count := v_Count + 1;
+
+	End Loop;
+END;
+End Loop;
+Close cur_DwClaimantDetail;
+
+commit;
+v_commit_count := 0;
+
+	v_Count := 1;
+
+	OPEN cur_Dw_OS_ClaimantDetail;
+	Loop
+		FETCH cur_Dw_OS_ClaimantDetail INTO
+		V_Writing_Company,
+		V_Branch_Nbr,
+		V_Agency_Code,
+		V_Dept_Nbr,
+		V_Dept_Desc,
+		V_Line_Nbr,
+		V_Coverage_Line_Desc,
+		V_A_S_Line_Nbr,
+		V_A_S_Line_Desc,
+		V_Major_line_name,
+		V_Business_line_name,
+		V_Contract_Nbr,
+		V_Sum_Diff_Loss,
+		V_Sum_Diff_Alloc_Expense,
+		V_Sum_Diff_Unalloc_Expense,
+		V_Sum_Ceded_Diff_Loss,
+		V_Sum_Ceded_Diff_Expense,
+-- g.nmar
+		v_Sum_Ceded_Diff_ULAE;
+
+		EXIT WHEN cur_Dw_OS_ClaimantDetail%NOTFOUND;
+BEGIN
+
+    -- 03/05/2024 : Condition to avoid previous year (2023) data from Claim Center that has major line as Commercial for Special Accounts related polices
+    if  V_Branch_Nbr in(1,2,3,4,6,13,18,25,27,50,60)  and
+        V_Dept_Nbr in(80,81,82,84,101,112,113,117,118,119) and
+        V_Business_line_name in('Manual','Commercial Auto') and
+        V_Major_line_name ='Commercial' then
+            V_Major_line_name := 'Special Accounts';
+    end if;
+
+	If v_Count >= 7 Then
+		v_Count := 1;
+	End If;
+
+	While v_Count < 7 Loop
+
+
+	DBMS_OUTPUT.PUT_LINE('COUNT TEST	' || v_count);
+
+
+		If v_Count = 1 Then
+			v_Amount_Type := 'Direct O/S Loss';
+			V_Month_Amount := V_Sum_Diff_Loss;
+		ElsIf v_Count = 2 Then
+			v_Amount_Type := 'Direct O/S Alloc Expense';
+			V_Month_Amount := V_Sum_Diff_Alloc_Expense;
+		ElsIf v_Count = 3 Then
+			v_Amount_Type := 'Direct O/S Unalloc Expense';
+			V_Month_Amount := V_Sum_Diff_Unalloc_Expense;
+		ElsIf v_Count = 4 Then
+			v_Amount_Type := 'Ceded O/S Loss';
+			V_Month_Amount := V_Sum_Ceded_Diff_Loss;
+		ElsIf v_Count = 5 Then
+			v_Amount_Type := 'Ceded O/S Expense';
+			V_Month_Amount := V_Sum_Ceded_Diff_Expense;
+-- g.nmar
+		ElsIf v_Count = 6 Then
+			v_Amount_Type := 'Ceded O/S ULAE';
+			V_Month_Amount := V_Sum_Ceded_Diff_Ulae;
+		End If;
+
+	--DBMS_OUTPUT.PUT_LINE('Inserting Outstanding 	' || V_count);
+
+   IF v_month_amount = 0 THEN
+
+      NULL;
+
+   ELSE
+
+   BEGIN
+
+      v_branch_name := t_branch(v_branch_nbr).branch_name;
+
+   EXCEPTION
+
+      WHEN NO_DATA_FOUND THEN
+         v_branch_name := '';
+      WHEN others THEN
+        v_branch_name := '';
+   END;
+
+   BEGIN
+
+      v_agency_name := t_agency(v_agency_code).agency_name;
+      v_agency_state := t_agency(v_agency_code).domicile_state;
+
+   EXCEPTION
+
+      WHEN NO_DATA_FOUND THEN
+         v_agency_name := '';
+         v_agency_state := '';
+      WHEN others THEN
+         v_agency_name := '';
+         v_agency_state := '';
+   END;
+
+	INSERT INTO DW_Monthly_Summary
+		(
+		Dw_Monthly_Summary,
+		Writing_Company,
+		Branch_Nbr,
+		Branch_Name,
+		Agency_Code,
+		Agency_Name,
+		Agency_State,
+		Dept_Nbr,
+		Dept_Desc,
+		Line_Nbr,
+		Coverage_Line_Desc,
+		A_S_Line_Nbr,
+		A_S_Line_Desc,
+		Major_Line_Name,
+		Business_line_name,
+		Contract_Nbr,
+		Month,
+		Year,
+		Amount_Type,
+		Month_Amount)
+	Values
+		(Seq_Dw_Monthly_Summary.NextVal,
+		V_Writing_Company,
+		V_Branch_Nbr,
+		V_Branch_Name,
+		V_Agency_Code,
+		V_Agency_Name,
+		V_Agency_State,
+		V_Dept_Nbr,
+		V_Dept_Desc,
+		V_Line_Nbr,
+		V_Coverage_Line_Desc,
+		V_A_S_Line_Nbr,
+		V_A_S_Line_Desc,
+		V_Major_line_name,
+		V_Business_line_name,
+		V_Contract_Nbr,
+		V_Month,
+		V_Year,
+		V_Amount_Type,
+		V_Month_Amount);
+
+        commit_when_necessary(v_commit_count);
+
+   END IF;
+
+		v_Count := v_Count + 1;
+
+	End Loop;
+END;
+End Loop;
+Close cur_Dw_OS_ClaimantDetail;
+
+commit;
+v_commit_count := 0;
+
+--Update Direct_Salv_Subro and Ceded_Salv_Subro
+
+	v_Count := 1;
+
+	Open cur_SumSalvSubro;
+	Loop
+		FETCH cur_SumSalvSubro INTO
+		V_Writing_Company,
+		V_Branch_Nbr,
+		V_Agency_Code,
+		V_Dept_Nbr,
+		V_Dept_Desc,
+		V_Line_Nbr,
+		V_Coverage_Line_Desc,
+		V_A_S_Line_Nbr,
+		V_A_S_Line_Desc,
+		V_Major_line_name,
+		V_Business_line_name,
+		V_Contract_Nbr,
+		V_Sum_Salv_Subro,
+		V_Sum_Ceded_Salv_Subro;
+
+
+
+		EXIT WHEN cur_SumSalvSubro%NOTFOUND;
+
+	Begin
+
+	If v_Count >= 3 Then
+		v_Count := 1;
+	End If;
+
+	While v_Count < 3 Loop
+
+	If v_Count = 1 Then
+		v_Amount_Type := 'Direct Salvage/Subro';
+		V_Month_Amount := V_Sum_Salv_Subro;
+	ElsIf v_Count = 2 Then
+		v_Amount_Type := 'Ceded Salvage/Subro';
+		V_Month_Amount := V_Sum_Ceded_Salv_Subro;
+	End If;
+
+   BEGIN
+
+      v_branch_name := t_branch(v_branch_nbr).branch_name;
+
+   EXCEPTION
+
+      WHEN NO_DATA_FOUND THEN
+         v_branch_name := '';
+
+   END;
+
+   BEGIN
+
+      v_agency_name := t_agency(v_agency_code).agency_name;
+      v_agency_state := t_agency(v_agency_code).domicile_state;
+
+   EXCEPTION
+
+      WHEN NO_DATA_FOUND THEN
+         v_agency_name := '';
+         v_agency_state := '';
+
+   END;
+
+
+	INSERT INTO DW_Monthly_Summary
+		(
+		Dw_Monthly_Summary,
+		Writing_Company,
+		Branch_Nbr,
+		Branch_Name,
+		Agency_Code,
+		Agency_Name,
+		Agency_State,
+		Dept_Nbr,
+		Dept_Desc,
+		Line_Nbr,
+		Coverage_Line_Desc,
+		A_S_Line_Nbr,
+		A_S_Line_Desc,
+		Major_Line_Name,
+		Business_line_name,
+		Contract_Nbr,
+		Month,
+		Year,
+		Amount_Type,
+		Month_Amount)
+
+	Values
+		(Seq_Dw_Monthly_Summary.NextVal,
+		V_Writing_Company,
+		V_Branch_Nbr,
+		V_Branch_Name,
+		V_Agency_Code,
+		V_Agency_Name,
+		V_Agency_State,
+		V_Dept_Nbr,
+		V_Dept_Desc,
+		V_Line_Nbr,
+		V_Coverage_Line_Desc,
+		V_A_S_Line_Nbr,
+		V_A_S_Line_Desc,
+		V_Major_line_name,
+		V_Business_line_name,
+		V_Contract_Nbr,
+		V_Month,
+		V_Year,
+		V_Amount_Type,
+		V_Month_Amount);
+
+        commit_when_necessary(v_commit_count);
+
+		v_Count := v_Count + 1;
+	End Loop;
+END;
+End Loop;
+Close cur_SumSalvSubro;
+
+commit;
+
+	UPDATE run_date
+	SET end_time = SYSDATE
+	WHERE run_date = v_run_date;
+
+	COMMIT;
+
+-- call new procedure to calculate direct and ceded premium data
+Up_Monthly_Prems(v_Month, v_Year ) ;
+
+	RETURN;
+
+EXCEPTION
+
+	WHEN STANDARD.NO_DATA_FOUND THEN
+		RAISE_APPLICATION_ERROR (-20201, 'Data selection not successful.');
+
+END Up_Monthly_Summary;
+
+PROCEDURE Up_Monthly_Prems(v_Month Number,v_Year Number) Is
+
+   TYPE tp_branch_table_type IS TABLE OF branch%ROWTYPE
+         INDEX BY BINARY_INTEGER;
+
+   TYPE tp_agency_table_type IS TABLE OF agency%ROWTYPE
+         INDEX BY BINARY_INTEGER;
+
+V_Writing_Company			DW_Monthly_Summary.Writing_Company%Type;
+V_Branch_Nbr			DW_Monthly_Summary.Branch_Nbr%Type;
+V_Branch_Name			DW_Monthly_Summary.Branch_Name%Type;
+V_Agency_Code			DW_Monthly_Summary.Agency_Code%Type;
+V_Agency_Name			DW_Monthly_Summary.Agency_Name%Type;
+V_Agency_State			DW_Monthly_Summary.Agency_State%Type;
+V_Dept_Nbr				DW_Monthly_Summary.Dept_Nbr%Type;
+V_Dept_Desc				DW_Monthly_Summary.Dept_Desc%Type;
+V_Line_Nbr				DW_Monthly_Summary.Line_Nbr%Type;
+V_Coverage_Line_Desc		DW_Monthly_Summary.Coverage_Line_Desc%Type;
+V_A_S_Line_Nbr			DW_Monthly_Summary.A_S_Line_Nbr%Type;
+V_A_S_Line_Desc			DW_Monthly_Summary.A_S_Line_Desc%Type;
+V_Major_Line_Name			DW_Monthly_Summary.Major_Line_Name%Type;
+V_Business_Line_Name		DW_Monthly_Summary.Business_Line_Name%Type;
+V_Contract_Nbr			DW_Monthly_Summary.Contract_Nbr%Type;
+v_Rein_Contract			DW_PREM_DETAIL.Reinsurance_contract%TYPE ;
+
+
+V_Prev_Month			Number;
+V_Prev_Year				Number;
+v_prev_month_end			DATE ;
+v_Count				Number;
+v_commit_count			NUMBER := 0;
+v_Month_Begin			Date;
+v_Month_End				Date;
+v_run_date				NUMBER;
+
+v_prem_ceding_rate		NUMBER ;
+v_prem_basis			reinsurance_contract.prem_basis%TYPE ;
+v_comm_ceding_rate		reinsurance_contract.commission%type;
+v_used_percent			reinsurance_coverage.used_percent%TYPE ;
+v_rein_first_modified DATE;
+v_tot_WP				NUMBER ;
+v_curr_WP				NUMBER ;
+v_curr_comm				NUMBER ;
+v_curr_UE				NUMBER ;
+v_prev_UE				NUMBER ;
+v_calc_EP				NUMBER ;
+v_calc_ceded_EP NUMBER;
+v_eff_index				NUMBER ;
+v_run_index				NUMBER ;
+
+   t_branch                       tp_branch_table_type;
+   i_branch                       NUMBER;
+
+   t_agency                       tp_agency_table_type;
+   i_agency                       NUMBER;
+
+   CURSOR c_branch IS
+      SELECT *
+      FROM   branch;
+
+   CURSOR c_agency IS
+      SELECT *
+      FROM   agency;
+
+   CURSOR cur_unearned_prem IS
+      SELECT writing_company,
+             branch_nbr,
+             agency_code,
+             FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date) dept_nbr,
+             FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date) dept_desc,
+             major_line_name,
+             business_line_name,
+             line_nbr,
+             coverage_line_desc,
+             a_s_line_nbr,
+             a_s_line_desc,
+             NVL(contract_nbr, '0'),
+             NVL(reinsurance_contract, 0),
+             TO_NUMBER(TO_CHAR(term_effective_date,'yyyymm')),
+             NVL(SUM(written_prem), 0) tot_wp,
+             SUM(DECODE(GREATEST(trans_date, v_prev_month_end),
+                   v_prev_month_end, 0,
+                   trans_date, NVL(written_prem, 0),
+                   0)) cur_wp,
+             SUM(DECODE(GREATEST(trans_date, v_prev_month_end),
+                   v_prev_month_end, 0,
+                   trans_date, NVL(commission, 0),
+                   0)) cur_comm,
+             SUM(DECODE((dec_end_date - dec_begin_date),
+                   0, 0,
+                   DECODE(GREATEST(dec_end_date, v_month_end),
+                         dec_end_date, ROUND(NVL(written_prem, 0)
+                                             * ((dec_end_date
+                                             - v_month_end)
+                                             / (dec_end_date
+                                             - dec_begin_date)), 2),
+                         0))) cur_ue,
+             SUM(DECODE((dec_end_date - dec_begin_date),
+                   0, 0,
+                   DECODE(GREATEST(trans_date, v_prev_month_end),
+                         trans_date, 0,
+                         ROUND(NVL(written_prem, 0)
+                               * ((Dec_End_Date
+                               - v_prev_month_end)
+                               / (dec_end_date - dec_begin_date)), 2)))) prev_ue
+      FROM  dw_prem_detail
+      WHERE ((dec_end_date > v_month_end
+      AND   dec_begin_date <= v_month_end
+      AND   trans_date <= v_month_end)
+      OR    (dec_end_date > v_month_begin
+      AND   dec_end_date <= v_month_end
+      AND   trans_date <= v_month_end)
+      OR    (trans_date >= v_month_begin
+      AND   trans_date <= v_month_end))
+      AND   written_prem != 0
+      GROUP BY writing_company,
+               branch_nbr,
+               agency_code,
+               FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date),
+               FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date),
+               major_line_name,
+               business_line_name,
+               line_nbr,
+               coverage_line_desc,
+               a_s_line_nbr,
+               a_s_line_desc,
+               NVL(contract_nbr, '0'),
+               NVL(reinsurance_contract,0),
+               TO_NUMBER(TO_CHAR(term_effective_date,'yyyymm'));
+
+   CURSOR cur_reinW IS
+      SELECT   rc1.contract_nbr,
+               rc1.commission,
+               rcv.used_percent,
+               SUM(rl.prem_ceding_rate),
+               rc1.first_modified
+      FROM     reinsurance_contract rc1,
+               reinsurance_coverage rcv,
+               reinsurance_layer rl,
+               a_s_coverage_line ascl
+      WHERE    ascl.line_nbr = v_line_nbr
+      AND      ascl.coverage_line_desc = v_coverage_line_desc
+      AND      rc1.prem_basis = 'Written'
+      AND      rc1.reinsurance_type != 'Facultative'
+      AND      rcv.used_percent != 0
+      AND      rc1.contract_year = TRUNC(v_eff_index / 100)
+      AND      rcv.a_s_coverage_line = ascl.a_s_coverage_line
+      AND      rcv.reinsurance_contract = rc1.reinsurance_contract
+      AND      rc1.reinsurance_contract = rl.reinsurance_contract
+      AND      (rc1.contract_year = v_year
+      OR       rc1.contract_nbr NOT IN ('0077', '0078'))
+      AND      rc1.effective_date = (SELECT MAX(effective_date)
+                                     FROM   reinsurance_contract
+                                     WHERE  reinsurance_contract IN
+                                           (SELECT reinsurance_contract
+                                            FROM   reinsurance_coverage
+                                            WHERE  a_s_coverage_line = ascl.a_s_coverage_line)
+                                     AND    TO_NUMBER(TO_CHAR(effective_date,'yyyymm')) <= v_eff_index
+                                     AND    prem_basis = 'Written'
+                                     AND    reinsurance_type != 'Facultative'
+                                     AND    contract_nbr = rc1.contract_nbr)
+      GROUP BY rc1.contract_nbr, commission, used_percent, rc1.first_modified;
+
+   CURSOR cur_reinE IS
+      SELECT   rc1.contract_nbr,
+               rc1.commission,
+               rcv.used_percent,
+               SUM(rl.prem_ceding_rate)
+      FROM     reinsurance_contract rc1,
+               reinsurance_coverage rcv,
+               reinsurance_layer rl,
+               a_s_coverage_line ascl
+      WHERE    ascl.line_nbr = v_line_nbr
+      AND      ascl.coverage_line_desc = v_coverage_line_desc
+      AND      rc1.prem_basis = 'Earned'
+      AND      rc1.reinsurance_type != 'Facultative'
+      AND      rcv.used_percent != 0
+      AND      rcv.a_s_coverage_line = ascl.a_s_coverage_line
+      AND      rcv.reinsurance_contract = rc1.reinsurance_contract
+      AND      rc1.reinsurance_contract = rl.reinsurance_contract
+      AND      rc1.contract_year = v_year
+      AND      rc1.effective_date = (SELECT MAX(effective_date)
+                                     FROM   reinsurance_contract
+                                     WHERE  reinsurance_contract IN
+                                           (SELECT reinsurance_contract
+                                            FROM   reinsurance_coverage
+                                            WHERE  a_s_coverage_line = ascl.a_s_coverage_line)
+                                     AND TO_NUMBER(TO_CHAR(effective_date,'yyyymm')) <= v_run_index
+                                     AND prem_basis = 'Earned'
+                                     AND reinsurance_type != 'Facultative'
+                                     AND contract_nbr = rc1.contract_nbr)
+      GROUP BY rc1.contract_nbr, commission, used_percent;
+
+BEGIN
+
+    v_Month_Begin := TO_DATE(TO_CHAR(v_Month) || '/01/' || TO_CHAR(v_Year),
+          'MM/DD/YYYY');
+
+    v_Month_End := LAST_DAY(TO_DATE (TO_CHAR(v_Month) || '/01/' ||
+          TO_CHAR(v_Year) || ' 11:59:59 PM', 'MM/DD/YYYY HH:MI:SS PM'));
+
+	v_run_index := to_number(to_char(v_Month_End,'yyyymm')) ;
+
+	IF V_Month = 1 THEN
+		V_Prev_Month := 12;
+		V_Prev_Year := V_Year - 1;
+	ELSE
+		V_Prev_Month := V_Month  - 1;
+		V_Prev_Year := V_Year;
+	END IF;
+
+    v_Prev_Month_End := LAST_DAY(TO_DATE (TO_CHAR(v_prev_Month) || '/01/' ||
+          TO_CHAR(v_prev_Year) || ' 11:59:59 PM', 'MM/DD/YYYY HH:MI:SS PM'));
+
+   t_branch.DELETE;
+
+   FOR v_branch IN c_branch LOOP
+
+      i_branch := v_branch.branch_nbr;
+      t_branch(i_branch) := v_branch;
+
+   END LOOP;
+
+   t_agency.DELETE;
+
+   FOR v_agency IN c_agency LOOP
+
+      i_agency := v_agency.agency_code;
+      t_agency(i_agency) := v_agency;
+
+   END LOOP;
+
+	SELECT seq_run_date.NEXTVAL
+	INTO v_run_date
+	FROM dual;
+
+	INSERT INTO run_date (  run_date,
+				procedure_name,
+				start_date,
+				end_date,
+				operator_id,
+				start_time)
+			VALUES ( v_run_date,
+				'Up_Monthly_Prems',
+				v_Month_Begin,
+				v_Month_End,
+				USER,
+				SYSDATE);
+	COMMIT;
+
+
+-- Unearned Prem
+
+v_commit_count := 0;
+
+	Open cur_Unearned_Prem;
+	Loop
+		FETCH cur_Unearned_Prem INTO
+  V_Writing_Company,
+		V_Branch_Nbr,
+		V_Agency_Code,
+		V_Dept_Nbr,
+		V_Dept_Desc,
+		V_Major_line_name,
+		V_Business_line_name,
+		V_Line_Nbr,
+		V_Coverage_Line_Desc,
+		V_A_S_Line_Nbr,
+		V_A_S_Line_Desc,
+		v_Contract_Nbr,
+		V_Rein_Contract,
+		v_eff_index,
+		v_tot_WP,
+		v_curr_WP,
+		v_curr_comm,
+		v_curr_UE,
+		v_prev_UE;
+
+		EXIT WHEN cur_Unearned_Prem%NOTFOUND;
+
+		v_calc_EP := (v_prev_UE - v_curr_UE) + v_curr_wp;
+
+        BEGIN
+           v_branch_name := t_branch(v_branch_nbr).branch_name;
+        EXCEPTION
+           WHEN NO_DATA_FOUND THEN
+              v_branch_name := '';
+        END;
+
+        BEGIN
+           v_agency_name := t_agency(v_agency_code).agency_name;
+           v_agency_state := t_agency(v_agency_code).domicile_state;
+        EXCEPTION
+           WHEN NO_DATA_FOUND THEN
+              v_agency_name := '';
+              v_agency_state := '';
+        END;
+
+       	IF v_curr_WP != 0 THEN
+		   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+			Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+   Agency_State, Dept_Nbr, Dept_Desc,
+			Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+   Major_Line_Name, Business_line_name,
+			Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+		   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+			V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+   V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+			V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+   V_Major_line_name, V_Business_line_name,
+			v_Contract_Nbr, V_Month, V_Year,
+        		'Direct Written Premium',
+        		V_curr_WP);
+
+		   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+			Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+   Agency_State, Dept_Nbr, Dept_Desc,
+			Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+   Major_Line_Name, Business_line_name,
+			Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+		   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+			V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code, V_Agency_Name,
+   V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+			V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+   V_Major_line_name, V_Business_line_name,
+			v_Contract_Nbr, V_Month, V_Year,
+        		'Commission',
+        		V_curr_comm);
+		END IF;
+
+       	IF v_curr_UE != 0 THEN
+		   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+			Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+   Agency_State, Dept_Nbr, Dept_Desc,
+			Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+   Major_Line_Name, Business_line_name,
+			Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+		   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+			V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+   V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+			V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+   V_Major_line_name, V_Business_line_name,
+			v_Contract_Nbr, V_Month, V_Year,
+        		'Direct Unearned Prem',
+        		V_curr_UE);
+		END IF;
+
+		IF v_calc_EP != 0 THEN
+		   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+			Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+   Agency_State, Dept_Nbr, Dept_Desc,
+			Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+   Major_Line_Name, Business_line_name,
+			Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+		   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+			V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+   V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+			V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+   V_Major_line_name, V_Business_line_name,
+			v_Contract_Nbr, V_Month, V_Year,
+        		'Direct Earned Prem',
+        		v_calc_EP ) ;
+		END IF ;
+
+	-- find applicable contracts using the line_nbr for both Written and Earned
+ -- basis
+	-- process separate cursors for each
+	-- basis is 'Written'
+
+     --IF v_eff_index <= (v_year * 100) + v_month THEN
+
+           OPEN cur_ReinW;
+
+           LOOP
+               FETCH cur_ReinW INTO v_Contract_Nbr, v_comm_ceding_rate,
+                                    v_used_percent, v_prem_ceding_rate,
+                                    v_rein_first_modified;
+               EXIT WHEN cur_ReinW%NOTFOUND ;
+
+               IF v_prem_ceding_rate != 0 AND v_month_end > v_rein_first_modified THEN
+                IF v_curr_wp != 0 THEN
+                   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+                 Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+                 Agency_State, Dept_Nbr, Dept_Desc,
+                 Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+                 Major_Line_Name, Business_line_name,
+                 Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+                   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+                 V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+                 V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+                 V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+                 V_Major_line_name, V_Business_line_name,
+                 v_Contract_Nbr, V_Month, V_Year,'Ceded Written Premium',
+                 ROUND(v_curr_wp * v_prem_ceding_rate * v_used_percent,2) );
+
+                   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+                 Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+                  Agency_State, Dept_Nbr, Dept_Desc,
+                 Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+                 Major_Line_Name, Business_line_name,
+                 Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+                   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+                 V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+                 V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+                 V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+                 V_Major_line_name, V_Business_line_name,
+                 v_Contract_Nbr, V_Month, V_Year,'Ceded Commission',
+                 ROUND((v_curr_wp * v_prem_ceding_rate * v_used_percent)
+                    * v_comm_ceding_rate,2));
+                END IF ;
+
+                IF v_curr_UE != 0 THEN
+                   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+                 Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+                 Agency_State, Dept_Nbr, Dept_Desc,
+                 Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+                 Major_Line_Name, Business_line_name,
+                 Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+                   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+                 V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+                 V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+                 V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+                 V_Major_line_name, V_Business_line_name,
+                 v_Contract_Nbr, V_Month, V_Year,'Ceded Unearned Premium',
+                 ROUND(V_curr_UE * v_prem_ceding_rate * v_used_percent,2) );
+
+                END IF;
+
+
+                IF v_calc_EP != 0 THEN
+
+                   IF v_month_begin > v_rein_first_modified THEN
+                      v_calc_ceded_EP := v_calc_EP;
+                   ELSE
+                      v_calc_ceded_EP := (0 - v_curr_UE) + v_curr_wp;
+                   END IF;
+
+                   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+                 Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+                 Agency_State, Dept_Nbr, Dept_Desc,
+                 Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+                 Major_Line_Name, Business_line_name,
+                 Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+                   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+                 V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+                 V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+                 V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+                 V_Major_line_name, V_Business_line_name,
+                 v_Contract_Nbr, V_Month, V_Year,
+                           'Ceded Earned Premium',
+                           ROUND(v_calc_ceded_EP * v_prem_ceding_rate * v_used_percent,2) );
+
+                END IF ;
+
+              END IF ;
+
+           END LOOP;
+
+		         CLOSE cur_ReinW ;
+
+     --END IF;
+
+	-- basis is 'Earned'
+
+		OPEN cur_ReinE;
+		LOOP
+		FETCH cur_ReinE INTO v_Contract_Nbr, v_comm_ceding_rate,
+                       v_used_percent, v_prem_ceding_rate ;
+		EXIT WHEN cur_ReinE%NOTFOUND ;
+
+		IF v_prem_ceding_rate != 0 THEN
+			IF v_calc_EP != 0 THEN
+			   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+				Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+    Agency_State, Dept_Nbr, Dept_Desc,
+				Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+    Major_Line_Name, Business_line_name,
+				Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+			   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+				V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+    V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+				V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+    V_Major_line_name, V_Business_line_name,
+				v_Contract_Nbr, V_Month, V_Year,
+           			'Ceded Written Premium',
+            		ROUND(v_calc_EP * v_prem_ceding_rate* v_used_percent,2) );
+
+			   INSERT INTO DW_Monthly_Summary (Dw_Monthly_Summary,
+				Writing_Company, Branch_Nbr, Branch_Name, Agency_Code, Agency_Name,
+    Agency_State, Dept_Nbr, Dept_Desc,
+				Line_Nbr, Coverage_Line_Desc, A_S_Line_Nbr, A_S_Line_Desc,
+    Major_Line_Name, Business_line_name,
+				Contract_Nbr, Month, Year, Amount_Type, Month_Amount)
+			   VALUES (Seq_Dw_Monthly_Summary.NextVal,
+				V_Writing_Company, V_Branch_Nbr, V_Branch_Name, V_Agency_Code,
+    V_Agency_Name, V_Agency_State, V_Dept_Nbr, V_Dept_Desc,
+				V_Line_Nbr, V_Coverage_Line_Desc, V_A_S_Line_Nbr, V_A_S_Line_Desc,
+    V_Major_line_name, V_Business_line_name,
+				v_Contract_Nbr, V_Month, V_Year,
+           			'Ceded Earned Premium',
+            		ROUND(v_calc_EP * v_prem_ceding_rate* v_used_percent,2) );
+			END IF ;
+
+		END IF ;
+
+		END LOOP;
+		CLOSE cur_ReinE ;
+
+        commit_when_necessary(v_commit_count);
+
+    End Loop;
+    Close cur_Unearned_Prem;
+
+   COMMIT;
+
+	UPDATE run_date
+	SET end_time = SYSDATE
+	WHERE run_date = v_run_date;
+
+	COMMIT;
+
+	RETURN;
+
+EXCEPTION
+
+	WHEN STANDARD.NO_DATA_FOUND THEN
+		RAISE_APPLICATION_ERROR (-20201, 'Data selection not successful.');
+
+END Up_Monthly_Prems;
+
+
+PROCEDURE get_required_value
+      (v_writing_company    IN  dw_monthly_summary.writing_company%TYPE,
+       v_branch_nbr         IN  dw_monthly_summary.branch_nbr%TYPE,
+       v_agency_code        IN  dw_monthly_summary.agency_code%TYPE,
+       v_dept_nbr           IN  dw_monthly_summary.dept_nbr%TYPE,
+       v_dept_desc          IN  dw_monthly_summary.dept_desc%TYPE,
+       v_major_line_name    IN  dw_monthly_summary.major_line_name%TYPE,
+       v_business_line_name IN  dw_monthly_summary.business_line_name%TYPE,
+       v_line_nbr           IN  dw_monthly_summary.line_nbr%TYPE,
+       v_a_s_line_nbr       IN  dw_monthly_summary.a_s_line_nbr%TYPE,
+       v_a_s_line_desc      IN  dw_monthly_summary.a_s_line_desc%TYPE,
+       v_contract_nbr       IN  dw_monthly_summary.contract_nbr%TYPE,
+       v_Month              IN  NUMBER,
+       v_Year               IN  NUMBER,
+       v_amount_type        IN  dw_monthly_summary.amount_type%TYPE,
+       v_month_amount       OUT dw_monthly_summary.month_amount%TYPE)
+
+IS
+
+BEGIN
+
+-- G.N Added condition -(Where Rownum = 1)
+-- 3/1/2000 GNorton changed to sum the amount instead of just getting the
+--              first row's value
+
+   SELECT /*+ RULE*/ NVL(SUM(month_amount), 0)
+   INTO   v_month_amount
+   FROM   dw_monthly_summary
+   WHERE  writing_company = v_writing_company
+   AND    branch_nbr = v_branch_nbr
+   AND    agency_code = v_agency_code
+   AND    dept_nbr = v_dept_nbr
+   AND    dept_desc = v_dept_desc
+   AND    major_line_name = v_major_line_name
+   AND    business_line_name = v_business_line_name
+   AND    line_nbr = v_line_nbr
+   AND    a_s_line_nbr = v_a_s_line_nbr
+   AND    a_s_line_desc = v_a_s_line_desc
+   AND    NVL(contract_nbr, '0') = v_contract_nbr
+   AND    month = v_month
+   AND    year = v_year
+   AND    amount_type = v_amount_type;
+
+END get_required_value;
+
+PROCEDURE commit_when_necessary(p_commit_count IN OUT NUMBER) IS
+
+BEGIN
+
+   p_commit_count := p_commit_count + 1;
+
+   IF p_commit_count > 999 THEN
+
+      COMMIT;
+      p_commit_count := 0;
+
+   END IF;
+
+END commit_when_necessary;
+
+FUNCTION direct_os_loss (p_trans_type VARCHAR2, p_reserve FLOAT, p_paid FLOAT, p_source VARCHAR2)
+      RETURN FLOAT IS
+
+BEGIN
+
+   IF p_trans_type LIKE 'Credit%' AND p_source='CMS' THEN
+      RETURN 0;
+   ELSE
+      RETURN (NVL(p_reserve, 0) - NVL(p_paid, 0));
+   END IF;
+
+END;
+
+FUNCTION FN_DEPT_NBR_DW_PREM_DETAIL (
+    p_policynumber         IN VARCHAR2,
+    p_policy_eff_date      IN DATE
+) RETURN NUMBER IS
+    v_dept_nbr NUMBER;
+BEGIN
+
+	 SELECT dept_nbr
+			INTO v_dept_nbr
+    FROM (
+		SELECT
+			d.dept_nbr
+		FROM
+			bop_class_codes                 bcc,
+			bop_package_category            bpc,
+			bop_package_type                bpt,
+			param_values                    pv,
+			policy_prefix                   pp,
+			dept                            d,
+			param_values                    pv2,
+			class_code_data@ecig_to_pc_link cd
+		WHERE
+				pv.value = cd.bp7classcode
+			AND cd.policynumber = p_policynumber
+			AND bcc.bop_package_category = bpc.bop_package_category
+			AND bpc.bop_package_type = bpt.bop_package_type
+			AND bcc.class_code_nbr = pv.param_values
+			AND bpt.type = pv2.param_values
+			AND bpc.dept = d.dept
+			AND d.major_line = pp.major_line
+			AND pp.policy_prefix IN (
+				SELECT
+					policy_prefix
+				FROM
+					policy_prefix
+				WHERE
+					prefix = (
+						SELECT
+							decode(instr(p_policynumber, 'SOP'), 1, 'SOP', 'BOP')
+						FROM
+							dual
+					)
+			)
+			AND ROWNUM = 1
+			AND bcc.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			AND bcc.effective_date = (
+				SELECT
+					MAX(effective_date)
+				FROM
+					bop_class_codes bcc2
+				WHERE
+						bcc2.class_code_nbr = bcc.class_code_nbr
+					AND bcc2.bop_package_category = bcc.bop_package_category
+					AND bcc2.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			)
+
+		UNION ALL
+		SELECT
+				dp.dept_nbr
+			FROM
+				ecig_dept_details_temp                     dp
+				INNER JOIN class_code_data@ecig_to_pc_link CD
+				ON dp.classcode = cd.bp7classcode
+				AND dp.effective_date <= trunc(TO_TIMESTAMP(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+				AND ROWNUM = 1
+		) WHERE ROWNUM = 1;
+
+    RETURN v_dept_nbr;
+END;
+
+FUNCTION  FN_DEPT_DESC_DW_PREM_DETAIL (
+    p_policynumber         IN VARCHAR2,
+    p_policy_eff_date      IN DATE
+) RETURN VARCHAR2 IS
+    v_dept_desc VARCHAR2(80);
+BEGIN
+
+	 SELECT dept_desc
+			INTO v_dept_desc
+    FROM (
+		SELECT
+			d.dept_desc
+		FROM
+			bop_class_codes                 bcc,
+			bop_package_category            bpc,
+			bop_package_type                bpt,
+			param_values                    pv,
+			policy_prefix                   pp,
+			dept                            d,
+			param_values                    pv2,
+			class_code_data@ecig_to_pc_link cd
+		WHERE
+				pv.value = cd.bp7classcode
+			AND cd.policynumber = p_policynumber
+			AND bcc.bop_package_category = bpc.bop_package_category
+			AND bpc.bop_package_type = bpt.bop_package_type
+			AND bcc.class_code_nbr = pv.param_values
+			AND bpt.type = pv2.param_values
+			AND bpc.dept = d.dept
+			AND d.major_line = pp.major_line
+			AND pp.policy_prefix IN (
+				SELECT
+					policy_prefix
+				FROM
+					policy_prefix
+				WHERE
+					prefix = (
+						SELECT
+							decode(instr(p_policynumber, 'SOP'), 1, 'SOP', 'BOP')
+						FROM
+							dual
+					)
+			)
+			AND ROWNUM = 1
+			AND bcc.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			AND bcc.effective_date = (
+				SELECT
+					MAX(effective_date)
+				FROM
+					bop_class_codes bcc2
+				WHERE
+						bcc2.class_code_nbr = bcc.class_code_nbr
+					AND bcc2.bop_package_category = bcc.bop_package_category
+					AND bcc2.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			)
+
+		UNION ALL
+		SELECT
+				dp.dept_desc
+			FROM
+				ecig_dept_details_temp                     dp
+				INNER JOIN class_code_data@ecig_to_pc_link CD
+				ON dp.classcode = cd.bp7classcode
+				AND dp.effective_date <= trunc(TO_TIMESTAMP(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+				AND ROWNUM = 1
+		) WHERE ROWNUM = 1;
+
+    RETURN v_dept_desc;
+END;
+
+END pkg_Monthly_DW_Update;
