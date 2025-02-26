@@ -22,13 +22,13 @@ PROCEDURE Get_Required_Value
        v_month_amount       OUT dw_monthly_summary.month_amount%TYPE);
 
 PROCEDURE commit_when_necessary(p_commit_count IN OUT NUMBER);
-FUNCTION FN_DEPT_NBR_DW_PREM_DETAIL (p_policynumber IN VARCHAR2,p_policy_eff_date IN DATE) RETURN NUMBER;
-FUNCTION FN_DEPT_DESC_DW_PREM_DETAIL (p_policynumber IN VARCHAR2,p_policy_eff_date  IN DATE) RETURN VARCHAR2;
+FUNCTION FN_DEPT_NBR (p_policynumber IN VARCHAR2,p_policy_eff_date IN DATE) RETURN NUMBER;
+FUNCTION FN_DEPT_DESC (p_policynumber IN VARCHAR2,p_policy_eff_date  IN DATE) RETURN VARCHAR2;
 FUNCTION direct_os_loss (p_trans_type VARCHAR2, p_reserve FLOAT, p_paid FLOAT, p_source VARCHAR2) RETURN FLOAT;
 
 END pkg_Monthly_DW_Update;
 
-create or replace PACKAGE BODY                                    pkg_Monthly_DW_Update AS
+create or replace PACKAGE BODY                                                  pkg_Monthly_DW_Update AS
 
 PROCEDURE Up_Monthly_Summary(v_Month Number,v_Year Number) Is
 
@@ -847,71 +847,63 @@ v_run_index				NUMBER ;
       SELECT *
       FROM   agency;
 
-   CURSOR cur_unearned_prem IS
-      SELECT writing_company,
-             branch_nbr,
-             agency_code,
-             FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date) dept_nbr,
-             FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date) dept_desc,
-             major_line_name,
-             business_line_name,
-             line_nbr,
-             coverage_line_desc,
-             a_s_line_nbr,
-             a_s_line_desc,
-             NVL(contract_nbr, '0'),
-             NVL(reinsurance_contract, 0),
-             TO_NUMBER(TO_CHAR(term_effective_date,'yyyymm')),
-             NVL(SUM(written_prem), 0) tot_wp,
-             SUM(DECODE(GREATEST(trans_date, v_prev_month_end),
-                   v_prev_month_end, 0,
-                   trans_date, NVL(written_prem, 0),
-                   0)) cur_wp,
-             SUM(DECODE(GREATEST(trans_date, v_prev_month_end),
-                   v_prev_month_end, 0,
-                   trans_date, NVL(commission, 0),
-                   0)) cur_comm,
-             SUM(DECODE((dec_end_date - dec_begin_date),
-                   0, 0,
-                   DECODE(GREATEST(dec_end_date, v_month_end),
-                         dec_end_date, ROUND(NVL(written_prem, 0)
-                                             * ((dec_end_date
-                                             - v_month_end)
-                                             / (dec_end_date
-                                             - dec_begin_date)), 2),
-                         0))) cur_ue,
-             SUM(DECODE((dec_end_date - dec_begin_date),
-                   0, 0,
-                   DECODE(GREATEST(trans_date, v_prev_month_end),
-                         trans_date, 0,
-                         ROUND(NVL(written_prem, 0)
-                               * ((Dec_End_Date
-                               - v_prev_month_end)
-                               / (dec_end_date - dec_begin_date)), 2)))) prev_ue
-      FROM  dw_prem_detail
-      WHERE ((dec_end_date > v_month_end
-      AND   dec_begin_date <= v_month_end
-      AND   trans_date <= v_month_end)
-      OR    (dec_end_date > v_month_begin
-      AND   dec_end_date <= v_month_end
-      AND   trans_date <= v_month_end)
-      OR    (trans_date >= v_month_begin
-      AND   trans_date <= v_month_end))
-      AND   written_prem != 0
-      GROUP BY writing_company,
-               branch_nbr,
-               agency_code,
-               FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date),
-               FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date),
-               major_line_name,
-               business_line_name,
-               line_nbr,
-               coverage_line_desc,
-               a_s_line_nbr,
-               a_s_line_desc,
-               NVL(contract_nbr, '0'),
-               NVL(reinsurance_contract,0),
-               TO_NUMBER(TO_CHAR(term_effective_date,'yyyymm'));
+   CURSOR cur_unearned_prem IS      
+    WITH DeptInfo AS (  
+        SELECT 
+            dw_prem_detail,
+            policy_nbr,
+            term_effective_date,
+            FN_DEPT_NBR(policy_nbr, term_effective_date)  dept_nbr,
+            FN_DEPT_DESC(policy_nbr, term_effective_date)  dept_desc
+        FROM dw_prem_detail
+        WHERE ((dec_end_date > v_month_end
+            AND dec_begin_date <= v_month_end
+            AND trans_date <= v_month_end)
+            OR (dec_end_date > v_month_begin
+            AND dec_end_date <= v_month_end
+            AND trans_date <= v_month_end)
+            OR (trans_date >= v_month_begin
+            AND trans_date <= v_month_end))
+            AND written_prem != 0
+    ),
+    AggregatedData AS ( 
+        SELECT 
+            d.writing_company,
+            d.branch_nbr,
+            d.agency_code,
+            di.dept_nbr,
+            di.dept_desc,
+            d.major_line_name,
+            d.business_line_name,
+            d.line_nbr,
+            d.coverage_line_desc,
+            d.a_s_line_nbr,
+            d.a_s_line_desc,
+            NVL(d.contract_nbr, '0')  contract_nbr,
+            NVL(d.reinsurance_contract, 0)  reinsurance_contract,
+            TO_NUMBER(TO_CHAR(d.term_effective_date,'yyyymm'))  term_effective_date,
+            NVL(SUM(d.written_prem), 0) AS tot_wp,
+            SUM(DECODE(GREATEST(d.trans_date, v_prev_month_end), v_prev_month_end, 0, d.trans_date, NVL(d.written_prem, 0), 0))  cur_wp,
+            SUM(DECODE(GREATEST(d.trans_date, v_prev_month_end), v_prev_month_end, 0, d.trans_date, NVL(d.commission, 0), 0))  cur_comm,
+            SUM(DECODE((d.dec_end_date - d.dec_begin_date), 0, 0, DECODE(GREATEST(d.dec_end_date, v_month_end), d.dec_end_date, ROUND(NVL(d.written_prem, 0) * ((d.dec_end_date - v_month_end) / (d.dec_end_date - d.dec_begin_date)), 2), 0)))  cur_ue,
+            SUM(DECODE((d.dec_end_date - d.dec_begin_date), 0, 0, DECODE(GREATEST(d.trans_date, v_prev_month_end), d.trans_date, 0, ROUND(NVL(d.written_prem, 0) * ((d.dec_end_date - v_prev_month_end) / (d.dec_end_date - d.dec_begin_date)), 2))))  prev_ue
+        FROM dw_prem_detail d
+        JOIN DeptInfo di ON d.policy_nbr = di.policy_nbr AND d.dw_prem_detail = di.dw_prem_detail  
+        WHERE ((d.dec_end_date > v_month_end
+            AND d.dec_begin_date <= v_month_end
+            AND d.trans_date <= v_month_end)
+            OR (d.dec_end_date > v_month_begin
+            AND d.dec_end_date <= v_month_end
+            AND d.trans_date <= v_month_end)
+            OR (d.trans_date >= v_month_begin
+            AND d.trans_date <= v_month_end))
+            AND d.written_prem != 0
+        GROUP BY d.writing_company, d.branch_nbr, d.agency_code, di.dept_nbr, di.dept_desc, d.major_line_name, d.business_line_name,
+        d.line_nbr, d.coverage_line_desc, d.a_s_line_nbr, d.a_s_line_desc, 
+        NVL(d.contract_nbr, '0'), NVL(d.reinsurance_contract, 0),
+        TO_NUMBER(TO_CHAR(d.term_effective_date,'yyyymm'))
+    )
+    SELECT * FROM AggregatedData; 
 
    CURSOR cur_reinW IS
       SELECT   rc1.contract_nbr,
@@ -1387,7 +1379,7 @@ BEGIN
 
 END;
 
-FUNCTION FN_DEPT_NBR_DW_PREM_DETAIL (
+FUNCTION FN_DEPT_NBR (
     p_policynumber         IN VARCHAR2,
     p_policy_eff_date      IN DATE
 ) RETURN NUMBER IS
@@ -1431,7 +1423,7 @@ BEGIN
 					)
 			)
 			AND ROWNUM = 1
-			AND bcc.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			AND bcc.effective_date <= p_policy_eff_date
 			AND bcc.effective_date = (
 				SELECT
 					MAX(effective_date)
@@ -1440,7 +1432,7 @@ BEGIN
 				WHERE
 						bcc2.class_code_nbr = bcc.class_code_nbr
 					AND bcc2.bop_package_category = bcc.bop_package_category
-					AND bcc2.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+					AND bcc2.effective_date <= p_policy_eff_date
 			)
 
 		UNION ALL
@@ -1450,14 +1442,14 @@ BEGIN
 				ecig_dept_details_temp                     dp
 				INNER JOIN class_code_data@ecig_to_pc_link CD
 				ON dp.classcode = cd.bp7classcode
-				AND dp.effective_date <= trunc(TO_TIMESTAMP(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+				AND dp.effective_date <= p_policy_eff_date
 				AND ROWNUM = 1
 		) WHERE ROWNUM = 1;
 
     RETURN v_dept_nbr;
 END;
 
-FUNCTION  FN_DEPT_DESC_DW_PREM_DETAIL (
+FUNCTION  FN_DEPT_DESC (
     p_policynumber         IN VARCHAR2,
     p_policy_eff_date      IN DATE
 ) RETURN VARCHAR2 IS
@@ -1501,7 +1493,7 @@ BEGIN
 					)
 			)
 			AND ROWNUM = 1
-			AND bcc.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			AND bcc.effective_date <= p_policy_eff_date
 			AND bcc.effective_date = (
 				SELECT
 					MAX(effective_date)
@@ -1510,7 +1502,7 @@ BEGIN
 				WHERE
 						bcc2.class_code_nbr = bcc.class_code_nbr
 					AND bcc2.bop_package_category = bcc.bop_package_category
-					AND bcc2.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+					AND bcc2.effective_date <= p_policy_eff_date
 			)
 
 		UNION ALL
@@ -1520,7 +1512,7 @@ BEGIN
 				ecig_dept_details_temp                     dp
 				INNER JOIN class_code_data@ecig_to_pc_link CD
 				ON dp.classcode = cd.bp7classcode
-				AND dp.effective_date <= trunc(TO_TIMESTAMP(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+				AND dp.effective_date <= p_policy_eff_date
 				AND ROWNUM = 1
 		) WHERE ROWNUM = 1;
 
