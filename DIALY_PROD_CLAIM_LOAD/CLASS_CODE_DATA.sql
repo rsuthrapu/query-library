@@ -2,6 +2,7 @@ CREATE TABLE CLASS_CODE_DATA as
     WITH CLASS_CODE_DATA AS(
                     SELECT
                     BP7CLASSCODE,
+                    PP.POLICYNUMBER,
                     C.BRANCHID,
                     ROW_NUMBER() OVER(PARTITION BY C.BRANCHID, C.BUILDING
                                                     ORDER BY C.BUILDING, C.BP7CLASSCODE) AS BUILDING_ROWNUM
@@ -32,6 +33,7 @@ EXECUTE IMMEDIATE '
             WITH CLASS_CODE_DATA AS(
                     SELECT
                     BP7CLASSCODE,
+                    PP.POLICYNUMBER,
                     C.BRANCHID,
                     ROW_NUMBER() OVER(PARTITION BY C.BRANCHID, C.BUILDING
                                                     ORDER BY C.BUILDING, C.BP7CLASSCODE) AS BUILDING_ROWNUM
