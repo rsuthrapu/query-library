@@ -1,0 +1,938 @@
+create or replace FUNCTION        stg_dept_details (
+    v_policy_number         IN VARCHAR2,
+    v_term_effective_date      IN DATE,
+    v_classification_code IN VARCHAR2
+) RETURN NUMBER IS
+    v_dept_nbr NUMBER;
+BEGIN
+
+	 SELECT dept_nbr
+			INTO v_dept_nbr
+    FROM (
+		SELECT
+                                d.dept_nbr                                
+                            FROM
+                                bop_class_codes      bcc,
+                                bop_package_category bpc,
+                                bop_package_type     bpt,
+                                param_values         pv,
+                                policy_prefix        pp,
+                                dept                 d,
+                                param_values         pv2,
+								class_code_data@ecig_to_pc_link cd
+                            WHERE
+                                    pv.value = cd.bp7classcode
+                                AND cd.policynumber =  v_policy_number   
+                                AND bcc.bop_package_category = bpc.bop_package_category
+                                AND bpc.bop_package_type = bpt.bop_package_type
+                                AND bcc.class_code_nbr = pv.param_values
+                                AND bpt.type = pv2.param_values
+                                AND bpc.dept = d.dept
+                                AND d.major_line = pp.major_line
+                                 AND pp.policy_prefix IN (
+                                        SELECT
+                                            policy_prefix
+                                        FROM
+                                            policy_prefix
+                                        WHERE
+                                            prefix = (
+                                                SELECT
+                                                    decode(instr(v_policy_number, 'SOP'), 1, 'SOP', 'BOP')
+                                                FROM
+                                                    dual
+                                            )
+                                    )
+                                AND ROWNUM = 1
+                                AND bcc.effective_date <= v_term_effective_date
+                                AND bcc.effective_date = (
+                                    SELECT
+                                        MAX(effective_date)
+                                    FROM
+                                        bop_class_codes bcc2
+                                    WHERE
+                                            bcc2.class_code_nbr = bcc.class_code_nbr
+                                        AND bcc2.bop_package_category = bcc.bop_package_category
+                                        AND bcc2.effective_date <= v_term_effective_date
+			)
+
+		UNION ALL
+       SELECT
+                                dept_nbr
+                            FROM
+                                ecig_dept_details_temp
+                            WHERE
+                                    classcode = TO_NUMBER(v_classification_code)
+                                AND effective_date <= v_term_effective_date
+                                AND ROWNUM = 1
+		) WHERE ROWNUM = 1;
+    RETURN v_dept_nbr;
+END;
+
+
+WITH dept_info AS (
+  SELECT /* MATERIALIZED */
+    DWP.DW_PREM_DETAIL,
+    PT.PC_POLICY_TRANSACTIONS,
+    PT.POLICY_NUMBER AS PTPOLICYNUMBER,
+    DWP.POLICY_NBR AS PREMPOLICYNUMBER,
+    DWP.DEPT_NBR,
+    DWP.DEPT_DESC,
+    PT.CLASSIFICATION_CODE,
+    PT.TERM_EFFECTIVE_DATE AS POLICYTERMEFFETIVE,
+    DWP.LINE_NBR,
+    DWP.TERM_EFFECTIVE_DATE AS PREMTREMEFFECTIVE,
+    STG_DEPT_DETAILS(
+      DWP.POLICY_NBR,
+      TO_DATE(DWP.TERM_EFFECTIVE_DATE),
+      PT.CLASSIFICATION_CODE
+      ) AS ORIGINAL_DEPT_NBR 
+  FROM
+    DW_PREM_DETAIL@PROD_ANALYTICS_LINK_USER  DWP
+    INNER JOIN pc_policy_transactions@PROD_ANALYTICS_LINK_USER PT ON PT.POLICY_NUMBER = DWP.POLICY_NBR
+    AND DWP.LINE_NBR = PT.COV_LINE_NUMBER
+    AND TRUNC (DWP.TRANS_DATE) = TRUNC (PT.TRANS_DATE)
+    WHERE EXTRACT(YEAR FROM DWP.TRANS_DATE) >= 2024 AND EXTRACT(MONTH FROM DWP.TRANS_DATE) >= 09
+    AND DWP.BUSINESS_LINE_NAME ='Business Owner'
+)
+SELECT
+  DISTINCT *
+FROM
+  dept_info;
+COMMIT; 
+  
+  WITH dept_info AS (
+  SELECT
+    DWP.DW_PREM_DETAIL,
+    PT.PC_POLICY_TRANSACTIONS,
+    PT.POLICY_NUMBER AS PTPOLICYNUMBER,
+    DWP.POLICY_NBR AS PREMPOLICYNUMBER,
+    DWP.DEPT_NBR,
+    DWP.DEPT_DESC,
+    PT.CLASSIFICATION_CODE,
+    PT.TERM_EFFECTIVE_DATE AS POLICYTERMEFFETIVE,
+    DWP.LINE_NBR,
+    DWP.TERM_EFFECTIVE_DATE AS PREMTREMEFFECTIVE,
+    ROW_NUMBER() OVER (
+      PARTITION BY DWP.DW_PREM_DETAIL,
+      PT.PC_POLICY_TRANSACTIONS,
+      PT.POLICY_NUMBER,
+      DWP.POLICY_NBR
+      ORDER BY
+        PT.TERM_EFFECTIVE_DATE DESC,
+        DWP.TERM_EFFECTIVE_DATE DESC
+    ) AS rn
+  FROM
+    DW_PREM_DETAIL@PROD_ANALYTICS_LINK_USER DWP
+    INNER JOIN pc_policy_transactions@PROD_ANALYTICS_LINK_USER PT ON PT.POLICY_NUMBER = DWP.POLICY_NBR
+    AND DWP.LINE_NBR = PT.COV_LINE_NUMBER
+    AND TRUNC(DWP.TRANS_DATE) = TRUNC(PT.TRANS_DATE)
+  WHERE
+    EXTRACT(
+      YEAR
+      FROM
+        DWP.TRANS_DATE
+    ) >= 2024
+    AND EXTRACT(
+      MONTH
+      FROM
+        DWP.TRANS_DATE
+    ) >= 09
+    AND DWP.BUSINESS_LINE_NAME LIKE '%Business Owner%'
+)
+SELECT
+  DISTINCT *
+FROM
+  dept_info
+WHERE
+  rn = 1;
+
+
+
+  CREATE TABLE whouse.STAGING_DW_PREM_DETAIL AS (
+select * from DW_PREM_DETAIL 
+WHERE EXTRACT(YEAR FROM TRANS_DATE) >= 2024 AND EXTRACT(MONTH FROM TRANS_DATE) >= 09 AND BUSINESS_LINE_NAME ='Business Owner');
+
+ALTER TABLE whouse.STAGING_DW_PREM_DETAIL
+ADD ORIGINAL_DEPT_NBR NUMBER(38,0);
+
+create or replace FUNCTION WHOUSE.FN_STAGING_DEPT_DW_PREM_DETAIL (
+    p_policynumber         IN VARCHAR2,
+    p_policy_eff_date      IN DATE
+) RETURN NUMBER IS
+    v_dept_nbr NUMBER;
+BEGIN
+
+	 SELECT dept_nbr
+			INTO v_dept_nbr
+    FROM (
+		SELECT
+			d.dept_nbr
+		FROM
+			bop_class_codes                 bcc,
+			bop_package_category            bpc,
+			bop_package_type                bpt,
+			param_values                    pv,
+			policy_prefix                   pp,
+			dept                            d,
+			param_values                    pv2,
+			class_code_data@ecig_to_pc_link cd
+		WHERE
+				pv.value = cd.bp7classcode
+			AND cd.policynumber = p_policynumber
+			AND bcc.bop_package_category = bpc.bop_package_category
+			AND bpc.bop_package_type = bpt.bop_package_type
+			AND bcc.class_code_nbr = pv.param_values
+			AND bpt.type = pv2.param_values
+			AND bpc.dept = d.dept
+			AND d.major_line = pp.major_line
+			AND pp.policy_prefix IN (
+				SELECT
+					policy_prefix
+				FROM
+					policy_prefix
+				WHERE
+					prefix = (
+						SELECT
+							decode(instr(p_policynumber, 'SOP'), 1, 'SOP', 'BOP')
+						FROM
+							dual
+					)
+			)
+			AND ROWNUM = 1
+			AND bcc.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			AND bcc.effective_date = (
+				SELECT
+					MAX(effective_date)
+				FROM
+					bop_class_codes bcc2
+				WHERE
+						bcc2.class_code_nbr = bcc.class_code_nbr
+					AND bcc2.bop_package_category = bcc.bop_package_category
+					AND bcc2.effective_date <= trunc(to_timestamp(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+			)
+
+		UNION ALL
+		SELECT
+				dp.dept_nbr
+			FROM
+				ecig_dept_details_temp                     dp
+				INNER JOIN class_code_data@ecig_to_pc_link CD
+				ON dp.classcode = cd.bp7classcode
+				AND dp.effective_date <= trunc(TO_TIMESTAMP(p_policy_eff_date, 'DD-MON-RR HH12:MI:SS.FF AM'))
+				AND ROWNUM = 1
+		) WHERE ROWNUM = 1;
+
+    RETURN v_dept_nbr;
+END;
+
+
+
+DECLARE
+  CURSOR c_dept IS
+      SELECT POLICY_NBR, TERM_EFFECTIVE_DATE,DW_PREM_DETAIL  FROM whouse.STAGING_DW_PREM_DETAIL;
+
+  TYPE t_rows IS TABLE OF c_dept%ROWTYPE INDEX BY PLS_INTEGER;
+  v_rows t_rows;
+
+  v_batch_size NUMBER := 10000;
+BEGIN
+  OPEN c_dept;
+
+  LOOP
+    FETCH c_dept BULK COLLECT INTO v_rows LIMIT v_batch_size;
+    EXIT WHEN v_rows.COUNT = 0;
+
+    FORALL i IN 1..v_rows.COUNT
+      UPDATE whouse.STAGING_DW_PREM_DETAIL
+      SET ORIGINAL_DEPT_NBR = WHOUSE.FN_STAGING_DEPT_DW_PREM_DETAIL(POLICY_NBR,TRUNC(TERM_EFFECTIVE_DATE))
+      WHERE DW_PREM_DETAIL = v_rows(i).DW_PREM_DETAIL;
+
+    COMMIT;
+  END LOOP;
+  CLOSE c_dept;
+END;
+
+
+
+ 
+ SELECT writing_company,
+             branch_nbr,
+             agency_code,
+             WHOUSE.FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date)  dept_nbr,
+             WHOUSE.FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date) dept_desc,
+             major_line_name,
+             business_line_name,
+             line_nbr,
+             coverage_line_desc,
+             a_s_line_nbr,
+             a_s_line_desc,
+             NVL(contract_nbr, '0'),
+             NVL(reinsurance_contract, 0),
+             TO_NUMBER(TO_CHAR(term_effective_date,'yyyymm')),
+             NVL(SUM(written_prem), 0) tot_wp,
+             SUM(DECODE(GREATEST(trans_date, LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1))),
+                   LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1)), 0,
+                   trans_date, NVL(written_prem, 0),
+                   0)) cur_wp,
+             SUM(DECODE(GREATEST(trans_date, LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1))),
+                   LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1)), 0,
+                   trans_date, NVL(commission, 0),
+                   0)) cur_comm,
+             SUM(DECODE((dec_end_date - dec_begin_date),
+                   0, 0,
+                   DECODE(GREATEST(dec_end_date, LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))),
+                         dec_end_date, ROUND(NVL(written_prem, 0)
+                                             * ((dec_end_date
+                                             - LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+                                             / (dec_end_date
+                                             - dec_begin_date)), 2),
+                         0))) cur_ue,
+             SUM(DECODE((dec_end_date - dec_begin_date),
+                   0, 0,
+                   DECODE(GREATEST(trans_date, LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1))),
+                         trans_date, 0,
+                         ROUND(NVL(written_prem, 0)
+                               * ((Dec_End_Date
+                               - LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1)))
+                               / (dec_end_date - dec_begin_date)), 2)))) prev_ue
+      FROM  dw_prem_detail
+      WHERE ((dec_end_date > LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   dec_begin_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+      OR    (dec_end_date > TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM')
+      AND   dec_end_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+      OR    (trans_date >= TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM')
+      AND   trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))))
+      AND   written_prem != 0
+      GROUP BY writing_company,
+               branch_nbr,
+               agency_code,
+             WHOUSE.FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date),
+             WHOUSE.FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date),
+               major_line_name,
+               business_line_name,
+               line_nbr,
+               coverage_line_desc,
+               a_s_line_nbr,
+               a_s_line_desc,
+               NVL(contract_nbr, '0'),
+               NVL(reinsurance_contract,0),
+               TO_NUMBER(TO_CHAR(term_effective_date,'yyyymm'))
+               ;
+               
+
+
+WITH DeptInfo AS (  
+    SELECT 
+	    dw_prem_detail,
+        policy_nbr,
+        term_effective_date,
+        whouse.FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date) AS dept_nbr,
+        whouse.FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date) AS dept_desc
+    FROM dw_prem_detail
+ WHERE ((dec_end_date > LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   dec_begin_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+      OR    (dec_end_date > TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM')
+      AND   dec_end_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+      OR    (trans_date >= TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM')
+      AND   trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))))
+      AND   written_prem != 0
+),
+AggregatedData AS ( -- Perform aggregations
+    SELECT 
+        d.writing_company,
+        d.branch_nbr,
+        d.agency_code,
+        di.dept_nbr,
+        di.dept_desc,
+        d.major_line_name,
+        d.business_line_name,
+        d.line_nbr,
+        d.coverage_line_desc,
+        d.a_s_line_nbr,
+        d.a_s_line_desc,
+        NVL(d.contract_nbr, '0') AS contract_nbr,
+        NVL(d.reinsurance_contract, 0) AS reinsurance_contract,
+        TO_NUMBER(TO_CHAR(d.term_effective_date,'yyyymm')) AS term_month,
+        NVL(SUM(d.written_prem), 0) AS tot_wp,
+         SUM(DECODE(GREATEST(trans_date, LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1))),
+                   LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1)), 0,
+                   trans_date, NVL(written_prem, 0),
+                   0)) cur_wp,
+             SUM(DECODE(GREATEST(trans_date, LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1))),
+                   LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1)), 0,
+                   trans_date, NVL(commission, 0),
+                   0)) cur_comm,
+             SUM(DECODE((dec_end_date - dec_begin_date),
+                   0, 0,
+                   DECODE(GREATEST(dec_end_date, LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))),
+                         dec_end_date, ROUND(NVL(written_prem, 0)
+                                             * ((dec_end_date
+                                             - LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+                                             / (dec_end_date
+                                             - dec_begin_date)), 2),
+                         0))) cur_ue,
+             SUM(DECODE((dec_end_date - dec_begin_date),
+                   0, 0,
+                   DECODE(GREATEST(trans_date, LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1))),
+                         trans_date, 0,
+                         ROUND(NVL(written_prem, 0)
+                               * ((Dec_End_Date
+                               - LAST_DAY(ADD_MONTHS(TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM'), -1)))
+                               / (dec_end_date - dec_begin_date)), 2)))) prev_ue
+    FROM dw_prem_detail d
+    JOIN DeptInfo di ON d.policy_nbr = di.policy_nbr AND d.dw_prem_detail = di.dw_prem_detail
+      WHERE ((d.dec_end_date > LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   d.dec_begin_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   d.trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+      OR    (d.dec_end_date > TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM')
+      AND   d.dec_end_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))
+      AND   d.trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY')))
+      OR    (d.trans_date >= TRUNC(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'), 'MM')
+      AND   d.trans_date <= LAST_DAY(TO_DATE('09' || '/' || TO_CHAR(SYSDATE, 'YYYY'), 'MM/YYYY'))))
+      AND   d.written_prem != 0
+    GROUP BY d.writing_company, d.branch_nbr, d.agency_code, di.dept_nbr, di.dept_desc, d.major_line_name, d.business_line_name,
+    d.line_nbr, d.coverage_line_desc, d.a_s_line_nbr, d.a_s_line_desc, 
+    NVL(d.contract_nbr, '0'), NVL(d.reinsurance_contract, 0),
+    TO_NUMBER(TO_CHAR(d.term_effective_date,'yyyymm'))
+)
+SELECT * FROM AggregatedData; 
+
+
+
+WITH DeptInfo AS (  
+    SELECT 
+	    dw_prem_detail,
+        policy_nbr,
+        term_effective_date,
+        FN_DEPT_NBR_DW_PREM_DETAIL(policy_nbr, term_effective_date) AS dept_nbr,
+        FN_DEPT_DESC_DW_PREM_DETAIL(policy_nbr, term_effective_date) AS dept_desc
+    FROM dw_prem_detail
+    WHERE ((dec_end_date > v_month_end
+        AND dec_begin_date <= v_month_end
+        AND trans_date <= v_month_end)
+        OR (dec_end_date > v_month_begin
+        AND dec_end_date <= v_month_end
+        AND trans_date <= v_month_end)
+        OR (trans_date >= v_month_begin
+        AND trans_date <= v_month_end))
+        AND written_prem != 0
+),
+AggregatedData AS ( 
+    SELECT 
+        d.writing_company,
+        d.branch_nbr,
+        d.agency_code,
+        di.dept_nbr,
+        di.dept_desc,
+        d.major_line_name,
+        d.business_line_name,
+        d.line_nbr,
+        d.coverage_line_desc,
+        d.a_s_line_nbr,
+        d.a_s_line_desc,
+        NVL(d.contract_nbr, '0') AS contract_nbr,
+        NVL(d.reinsurance_contract, 0) AS reinsurance_contract,
+        TO_NUMBER(TO_CHAR(d.term_effective_date,'yyyymm')) AS term_month,
+        NVL(SUM(d.written_prem), 0) AS tot_wp,
+        SUM(DECODE(GREATEST(d.trans_date, v_prev_month_end), v_prev_month_end, 0, d.trans_date, NVL(d.written_prem, 0), 0)) AS cur_wp,
+        SUM(DECODE(GREATEST(d.trans_date, v_prev_month_end), v_prev_month_end, 0, d.trans_date, NVL(d.commission, 0), 0)) AS cur_comm,
+        SUM(DECODE((d.dec_end_date - d.dec_begin_date), 0, 0, DECODE(GREATEST(d.dec_end_date, v_month_end), d.dec_end_date, ROUND(NVL(d.written_prem, 0) * ((d.dec_end_date - v_month_end) / (d.dec_end_date - d.dec_begin_date)), 2), 0))) AS cur_ue,
+        SUM(DECODE((d.dec_end_date - d.dec_begin_date), 0, 0, DECODE(GREATEST(d.trans_date, v_prev_month_end), d.trans_date, 0, ROUND(NVL(d.written_prem, 0) * ((d.dec_end_date - v_prev_month_end) / (d.dec_end_date - d.dec_begin_date)), 2)))) AS prev_ue
+    FROM dw_prem_detail d
+    JOIN DeptInfo di ON d.policy_nbr = di.policy_nbr AND d.dw_prem_detail = di.dw_prem_detail  
+    WHERE ((d.dec_end_date > v_month_end
+        AND d.dec_begin_date <= v_month_end
+        AND d.trans_date <= v_month_end)
+        OR (d.dec_end_date > v_month_begin
+        AND d.dec_end_date <= v_month_end
+        AND d.trans_date <= v_month_end)
+        OR (d.trans_date >= v_month_begin
+        AND d.trans_date <= v_month_end))
+        AND d.written_prem != 0
+    GROUP BY d.writing_company, d.branch_nbr, d.agency_code, di.dept_nbr, di.dept_desc, d.major_line_name, d.business_line_name,
+    d.line_nbr, d.coverage_line_desc, d.a_s_line_nbr, d.a_s_line_desc, 
+    NVL(d.contract_nbr, '0'), NVL(d.reinsurance_contract, 0),
+    TO_NUMBER(TO_CHAR(d.term_effective_date,'yyyymm'))
+)
+SELECT * FROM AggregatedData; 
+
+
+
+select year, month, dept_nbr, dept_desc, sum(nvl(mth_direct_written_prem,0)) DWP, sum(nvl(mth_direct_earned_prem,0)) DEP
+from dw_summary 
+where year = 2024  and month = 09
+and business_line_name ='Business Owner'
+having abs(sum(nvl(mth_direct_written_prem,0)))+abs(sum(nvl(mth_direct_earned_prem,0)))<>0
+group by year, month, dept_nbr, dept_desc;
+
+/*DATA*/	
+select year, month, dept_nbr, dept_desc, sum(nvl(mth_direct_written_prem,0)) DWP, sum(nvl(mth_direct_earned_prem,0)) DEP	
+from dw_summary 	
+where year >= 2023	
+and business_line_name ='Business Owner'	
+having abs(sum(nvl(mth_direct_written_prem,0)))+abs(sum(nvl(mth_direct_earned_prem,0)))<>0	
+group by year, month, dept_nbr, dept_desc;	
+	
+    
+select * from dw_prem_detail
+where extract(year from trans_date) = 2024  and extract(month from trans_date) = 09
+and business_line_name ='Business Owner'
+;
+
+select * from pc_policy_transactions where policy_number = '6-BOP-1-070023269';
+select whouse.get_dept_by_ppid('6-BOP-1-070023269','01-SEP-24',65132) from dual;
+
+select * from DW_Monthly_Summary
+where year = 2024  and month = 09
+and business_line_name ='Business Owner';
+
+select * from PC_DW_INFORCE_ARCHIVE ;
+
+Select 
+year,
+month,
+sum(nvl(mth_direct_loss_paid,0)) DIR_LOSS_PAID,
+sum(nvl(mth_direct_alloc_exp_paid,0)) DIR_ALAE_PAID,
+sum(nvl(mth_direct_unalloc_exp_paid,0)) DIR_ULAE_PAID,
+sum(nvl(mth_direct_loss_incurred,0)) DIR_LOSS_INC,
+sum(nvl(mth_direct_alloc_exp_inc,0)) DIR_ALAE_INC,
+sum(nvl(mth_direct_unalloc_exp_inc,0)) DIR_ULAE_INC,
+sum(nvl(mth_ceded_loss_paid,0)) CEDED_LOSS_PAID,
+sum(nvl(mth_ceded_expense_paid,0)) CEDED_ALAE_PAID,
+sum(nvl(mth_ceded_ULAE_paid,0)) CEDED_ULAE_PAID,
+sum(nvl(mth_ceded_loss_incurred,0)) CEDED_LOSS_INC,
+sum(nvl(mth_ceded_expense_inc,0)) CEDED_ALAE_INC,
+sum(nvl(mth_ceded_ULAE_incurred,0)) CEDED_ULAE_INC,
+sum(nvl(MTH_DIRECT_OS_LOSS,0)) DIR_LOSS_OS,
+sum(nvl(mth_direct_OS_alloc_exp,0)) DIR_ALAE_OS,
+sum(nvl(mth_direct_OS_unalloc_exp,0)) DIR_ULAE_OS,
+sum(nvl(MTH_ceded_OS_LOSS,0)) CEDED_LOSS_OS,
+sum(nvl(mth_ceded_OS_expense,0)) CEDED_ALAE_OS,
+sum(nvl(mth_ceded_OS_ulae,0)) CEDED_ULAE_OS
+from dw_summary
+where year in (2023, 2024)
+group by year, month
+order by year, month
+;
+
+BEGIN
+    WHOUSE.pkg_Daily_DW_Prem_detail.up_dw_daily_prem_tables('01-SEP-2024','30-SEP-2024');
+END;
+
+
+
+SELECT 	
+  extract(year from trans_date) YEAR,	
+  extract(month from trans_date) MONTH,	
+  DEPT_NBR,	
+  DEPT_DESC,	
+  SUM(WRITTEN_PREM) WP	
+FROM DW_PREM_DETAIL WHERE business_line_name ='Business Owner' and extract(year from trans_date) >=2024	
+GROUP BY	
+  extract(year from trans_date),	
+  extract(month from trans_date),	
+  DEPT_NBR,	
+  DEPT_DESC;	
+
+
+Truncate Table Whouse.Pc_Dw_Inforce; 
+Commit;
+
+Insert Into Whouse.Pc_Dw_Inforce (Select DISTINCT * From Whouse.Pc_Dw_Inforce_Archive Where Month = 11 And Year = 2024);
+Commit;
+
+SELECT * FROM Whouse.Pc_Dw_Inforce;
+
+
+select * from run_date where procedure_name = 'Pkg_Gwpc_Legacy.sp_insert_rundate' order by run_date desc; 
+
+delete from run_date where run_date = 913204;
+commit;
+
+
+
+Select claim_nbr,p.policynumber, business_line_name, dept_nbr, dept_desc,c.updatetime,
+sum(nvl(dl.LOSS_RESERVE,0)+ nvl(dl.ALLOC_EXPENSE_RESERVE,0) + nvl(dl.UNALLOC_EXPENSE_RESERVE,0)) DIR_TOTAL_INC
+from dw_claimant_detail dl, dw_claimant dc
+left join ccadmin.cc_claim@gw_prd_link c on c.claimnumber = dc.claim_nbr
+left join ccadmin.cc_policy@gw_prd_link p on c.policyid = p.id
+where 
+  dl.claimant_key = dc.CLAIMANT_KEY
+  and dl.source = dc.source
+  and dl.source ='CC'
+  and dept_nbr = 27
+group by   
+  claim_nbr, business_line_name, dept_nbr, dept_desc, p.policynumber ,c.updatetime
+order by sum(nvl(dl.LOSS_RESERVE,0)+ nvl(dl.ALLOC_EXPENSE_RESERVE,0) + nvl(dl.UNALLOC_EXPENSE_RESERVE,0)) desc
+;  
+
+
+SELECT DISTINCT status FROM CHECK_PAYABLE ORDER BY STATUS DESC;
+SELECT * FROM CIGADMIN.claimant_trans  WHERE check_payable IN (5687337,
+5687391,
+5688766,
+5691485,
+5706248,
+5688804,
+5707976,
+5703709); --3571070
+SELECT * FROM check_payable WHERE CHECK_NBR= 429883;
+SELECT * FROM CHECK_PAYABLE WHERE STATUS = 'New' ;
+
+select * from claimant_coverage where claimant_coverage in(31926);
+
+SELECT CT.CHECK_PAYABLE , CP.STATUS
+FROM CLAIMANT_TRANS CT
+i JOIN CHECK_PAYABLE CP ON CP.CHECK_PAYABLE = CT.CHECK_PAYABLE
+left join claimant_coverage cc on ct.claimant_coverage = cc.claimant_coverage 
+where cc.claimant_coverage = 52566;
+
+select  ct.claimant_trans , cp.status as checkstatus
+    , nvl(ct.claim,cc.claim) as CLAIMID
+    , ct.check_payable 
+    , ct.trans_type 
+    , ct.comments
+	, ct.create_id 
+    , ct.audit_id 
+    , ct.first_modified 
+    , ct.last_modified    
+    , ct.claimant_coverage
+    , ct.claimant
+    , ct.trans_date
+    , ct.expense_code
+    , cc.status
+FROM CLAIMANT_TRANS ct
+Left join CHECK_PAYABLE cp on ct.check_payable = cp.check_payable 
+LEFT JOIN CLAIMANT_COVERAGE cc on ct.CLAIMANT_COVERAGE = cc.CLAIMANT_COVERAGE
+where nvl(ct.claim,cc.claim) = 3666825--cc.claimant_coverage = 157394
+;
+
+SELECT * FROM CLAIMANT_TRANS where claimant_coverage = 31926;
+
+
+select * from CIGADMIN.check_payable where check_payable = 184331  where table_key in (3567348,
+3569173,
+3571070)
+where claim = 3666825;
+select * from claimant_coverage;
+select * from dw_prem_detail where policy_nbr in ('13-BOP-2-070015638');
+select * from ccadmin.cc_ritransaction@gw_prd_link;
+
+
+select * from bop_class_codes where class_code_nbr in(65132,19661,65121-01,65121-02,65141,59999-30);
+
+SELECT * FROM bop_class_codes WHERE class_code_nbr = '65132';
+
+SELECT * FROM PARAM_VALUES WHERE VALUE = '65132';
+SELECT * FROM class_code_data@ecig_to_pc_link WHERE POLICYNUMBER = '13-BOP-2-070015638' AND branchid = 563407 ;
+select * from policy_prefix;
+
+SELECT
+			d.dept_nbr, CD.bp7classcode,PV.VALUE,CD.BRANCHID
+		FROM
+			bop_class_codes                 bcc,
+			bop_package_category            bpc,
+			bop_package_type                bpt,
+			param_values                    pv,
+			policy_prefix                   pp,
+			dept                            d,
+			param_values                    pv2,            
+			class_code_data@ecig_to_pc_link cd
+		WHERE
+            pv.value = cd.bp7classcode
+			AND cd.branchid = 566321 
+			AND bcc.bop_package_category = bpc.bop_package_category
+			AND bpc.bop_package_type = bpt.bop_package_type
+			AND bcc.class_code_nbr = pv.param_values
+			AND bpt.type = pv2.param_values
+			AND bpc.dept = d.dept
+            and d.business_line = pp.business_line
+			AND d.major_line = pp.major_line
+            AND pp.policy_prefix IN (
+				SELECT
+					policy_prefix
+				FROM
+					policy_prefix
+				WHERE
+					prefix = (
+						SELECT
+							decode(instr('3-BOP-1-070008295', 'SOP'), 1, 'SOP', 'BOP')
+						FROM
+							dual
+					)
+			)
+			AND ROWNUM = 1
+            			AND bcc.effective_date <= trunc(to_timestamp('30-JUN-24', 'DD-MON-RR HH12:MI:SS.FF AM'))
+			AND bcc.effective_date = (
+				SELECT
+					MAX(effective_date)
+				FROM
+					bop_class_codes bcc2
+				WHERE
+						bcc2.class_code_nbr = bcc.class_code_nbr
+					AND bcc2.bop_package_category = bcc.bop_package_category
+					AND bcc2.effective_date <= trunc(to_timestamp('30-JUN-24', 'DD-MON-RR HH12:MI:SS.FF AM'))
+			)
+            ;
+
+SELECT * FROM DEPT;
+
+    WITH CLASS_CODE_DATA AS(
+                    SELECT
+                    BP7CLASSCODE,
+                    PP.POLICYNUMBER,
+                    C.BRANCHID,
+                    RU.PCLOCATIONFIXEDID_EXT,
+                    BP7B.TotalBuildingLimit_Ext,
+                    ROW_NUMBER() OVER(PARTITION BY C.BRANCHID, C.BUILDING
+                                                    ORDER BY C.BUILDING, C.BP7CLASSCODE) AS BUILDING_ROWNUM
+                    FROM  PCADMIN.PCX_BP7CLASSIFICATION@GW_PRD_LINK C
+                    INNER JOIN PCADMIN.PC_POLICYPERIOD@GW_PRD_LINK PP ON PP.ID=C.BRANCHID                     
+                    LEFT JOIN ccadmin.cc_policy@gw_prd_link P ON pp.id = p.policysystemperiodid
+                    LEFT JOIN CCADMIN.CC_RISKUNIT@GW_PRD_LINK RU ON P.ID = RU.POLICYID
+                    LEFT JOIN PCADMIN.pcx_bp7building@GW_PRD_LINK BP7B ON BP7B.LOCATION  = RU.PCLOCATIONFIXEDID_EXT                   
+                    ),
+                    CLASS_CODE_RECORD AS(
+                        SELECT * FROM CLASS_CODE_DATA
+                        WHERE  POLICYNUMBER = '3-BOP-1-070008295' AND BRANCHID = '566321' AND  BUILDING_ROWNUM < 2
+                       -- WHERE  POLICYNUMBER = '25-BOP-2-070006841' AND BRANCHID = 443461 AND  BUILDING_ROWNUM < 2
+                    )
+    SELECT * FROM CLASS_CODE_RECORD;
+    
+SELECT * FROM CHECK_PAYABLE WHERE STATUS = 'New';
+SELECT DISTINCT STATUS  FROM CHECK_PAYABLE;
+
+
+SELECT DISTINCT CODE , DESCRIPTION  FROM PCADMIN.PCX_BP7CLASSCODE@GW_PRD_LINK WHERE CODE IN ('65141','65132','65121-02');
+
+SELECT * FROM CCADMIN.CC_RISKUNIT@GW_PRD_LINK;
+
+SELECT RU.* -- RU.POLICYID, RU.POLICYLOCATIONID,RU.POLICYSYSTEMID , RU.PCLOCATIONFIXEDID_EXT , RU.DESCRIPTION , P.policysystemperiodid, PD.DEPTNUMBER, PD.DEPTNAME
+FROM CCADMIN.CC_RISKUNIT@GW_PRD_LINK RU
+LEFT JOIN ccadmin.cc_policy@gw_prd_link p ON P.ID = RU.POLICYID
+LEFT JOIN ccadmin.ccx_policydepartment_ext@ecig_to_gwcc_prd_link pd ON p.policydepartment_extid = pd.id
+WHERE RU.CLAIM_EXTID = 25932;
+
+-- 51532	entity.BP7Location:503329	503329
+
+SELECT POLICYNUMBER , POLICYID, ID FROM PCADMIN.PC_POLICYPERIOD@GW_PRD_LINK 
+WHERE ID = 27932;
+SELECT * FROM  PCADMIN.PCX_BP7CLASSIFICATION@GW_PRD_LINK;
+
+SELECT * FROM PCADMIN.pcx_bp7building@GW_PRD_LINK ;
+
+SELECT * FROM PC_POLICY_TRANSACTIONS WHERE policy_number = '3-BOP-1-070008295' AND POLICY_PERIOD_PUBLIC_ID = 'pc:566321' ;
+
+
+SET SERVEROUTPUT ON;
+DECLARE
+  CURSOR policy_cursor IS
+    WITH dept_bop_claims AS (
+      SELECT
+      DC.CLAIM_KEY ,
+        dc.claim_nbr,
+        p.id AS policyid,
+        p.policynumber,
+        dl.business_line_name,
+        dl.dept_nbr,
+        dl.dept_desc,
+        p.policysystemperiodid,
+        p.effectivedate
+      FROM
+        dw_claimant_detail dl,
+        dw_claimant dc
+        LEFT JOIN ccadmin.cc_claim@gw_prd_link c ON c.claimnumber = dc.claim_nbr
+        LEFT JOIN ccadmin.cc_policy@gw_prd_link p ON c.policyid = p.id
+      WHERE
+        dl.claimant_key = dc.CLAIMANT_KEY
+        AND dl.source = dc.source
+        AND dl.source = 'CC'
+        AND dept_nbr = 27
+        and dc.claim_nbr = 2018686
+ --2013417
+
+      GROUP BY
+      DC,CLAIM_KEY ,
+        dc.claim_nbr,
+        p.id,
+        p.policynumber,
+        p.id,
+        dl.business_line_name,
+        dl.dept_nbr,
+        dl.dept_desc,
+        p.policysystemperiodid,
+        p.effectivedate
+    )
+    SELECT *
+    FROM dept_bop_claims dbc;
+
+  rec_policy policy_cursor%ROWTYPE;
+  v_new_dept_nbr NUMBER; -- Declare a variable to store the result
+
+BEGIN
+  OPEN policy_cursor;
+
+  LOOP
+    FETCH policy_cursor INTO rec_policy;
+    EXIT WHEN policy_cursor%NOTFOUND;
+    
+    SELECT
+      whouse.get_dept_by_ppid(rec_policy.policynumber, rec_policy.effectivedate, rec_policy.policysystemperiodid)
+    INTO v_new_dept_nbr
+    FROM dual;
+
+   -- Print all the desired values
+    DBMS_OUTPUT.PUT_LINE(
+      'Claim Nbr: ' || rec_policy.claim_nbr ||
+      ', Policy ID: ' || rec_policy.policyid ||
+      ', Policy Number: ' || rec_policy.policynumber ||
+      ', Business Line: ' || rec_policy.business_line_name ||
+      ', Dept Nbr: ' || rec_policy.dept_nbr ||
+      ', Dept Desc: ' || rec_policy.dept_desc ||
+      ', Policy Period ID: ' || rec_policy.policysystemperiodid ||
+      ', Effective Date: ' || TO_CHAR(rec_policy.effectivedate, 'YYYY-MM-DD HH24:MI:SS') ||
+      ', New Dept Nbr: ' || v_new_dept_nbr
+    );
+
+  END LOOP;
+
+  CLOSE policy_cursor;
+END;
+
+
+SELECT
+--whouse.get_dept_by_ppid('13-BOP-2-070015638', '15-JUN-21', 563407)
+whouse.get_dept_by_ppid('3-BOP-1-070008295', '30-JUN-24', 566321)
+FROM dual;
+
+select * from class_code_data@ecig_to_pc_link where policynumber = '13-BOP-2-070015638' and branchid= 563407;
+SELECT * FROM pc_policy_transactions where policy_number = '13-BOP-2-070015638'; -- 15-JUN-21
+    
+    
+select * from whouse.dept_bop_claims_with_new_dept where claim_nbr in(2004867,2013417,2018686,2016491,2006434,2002458,2012470);
+
+
+CREATE TABLE whouse.dept_bop_claims_with_new_dept (
+    claim_nbr VARCHAR2(255),  
+    policyid NUMBER,
+    policynumber VARCHAR2(255), 
+    business_line_name VARCHAR2(255), 
+    dept_nbr NUMBER,
+    dept_desc VARCHAR2(255), 
+    policysystemperiodid NUMBER,
+    effectivedate DATE,
+    new_dept_nbr NUMBER
+);
+
+DECLARE
+    CURSOR policy_cursor IS
+        WITH dept_bop_claims AS (
+            SELECT
+                dc.claim_nbr,
+                p.id AS policyid,
+                p.policynumber,
+                dl.business_line_name,
+                dl.dept_nbr,
+                dl.dept_desc,
+                p.policysystemperiodid,
+                p.effectivedate
+            FROM
+                dw_claimant_detail dl,
+                dw_claimant dc
+                LEFT JOIN ccadmin.cc_claim@gw_prd_link c ON c.claimnumber = dc.claim_nbr
+                LEFT JOIN ccadmin.cc_policy@gw_prd_link p ON c.policyid = p.id
+            WHERE
+                dl.claimant_key = dc.CLAIMANT_KEY
+                AND dl.source = dc.source
+                AND dl.source = 'CC'
+                AND dept_nbr = 27
+            GROUP BY
+                dc.claim_nbr,
+                p.id,
+                p.policynumber,
+                p.id,
+                dl.business_line_name,
+                dl.dept_nbr,
+                dl.dept_desc,
+                p.policysystemperiodid,
+                p.effectivedate
+        )
+        SELECT *
+        FROM dept_bop_claims dbc;
+
+    rec_policy policy_cursor%ROWTYPE;
+    v_new_dept_nbr NUMBER;
+
+BEGIN
+    OPEN policy_cursor;
+
+    LOOP
+        FETCH policy_cursor INTO rec_policy;
+        EXIT WHEN policy_cursor%NOTFOUND;
+
+        SELECT
+            whouse.get_dept_by_ppid(rec_policy.policynumber, rec_policy.effectivedate, rec_policy.policysystemperiodid)
+        INTO v_new_dept_nbr
+        FROM dual;
+
+        -- Insert the data into the table
+        INSERT INTO whouse.dept_bop_claims_with_new_dept (
+            claim_nbr,
+            policyid,
+            policynumber,
+            business_line_name,
+            dept_nbr,
+            dept_desc,
+            policysystemperiodid,
+            effectivedate,
+            new_dept_nbr
+        ) VALUES (
+            rec_policy.claim_nbr,
+            rec_policy.policyid,
+            rec_policy.policynumber,
+            rec_policy.business_line_name,
+            rec_policy.dept_nbr,
+            rec_policy.dept_desc,
+            rec_policy.policysystemperiodid,
+            rec_policy.effectivedate,
+            v_new_dept_nbr
+        );
+
+    END LOOP;
+
+    CLOSE policy_cursor;
+    COMMIT; 
+END;
+
+
+-- 51532	entity.BP7Location:503329	503329	566321
+
+select id, policynumber, periodstart, periodend, modelnumber from PCADMIN.PC_POLICYPERIOD@GW_PRD_LINK 
+where id in(566321,189760) 
+;
+
+select bp7l.id, bp7l.fixedid,bp7l.branchid , bp7l.location, pl.addressline1internal ,pl.addressline2internal ,pl.cityinternal,
+bp7l.effectivedate , bp7l.expirationdate, bp7cc.code,  BP7C.bp7classcode
+from pcadmin.pcx_bp7location@gw_prd_link bp7l
+inner join pcadmin.pc_policylocation@gw_prd_link pl on bp7l.location = pl.id 
+and (bp7l.effectivedate is null and bp7l.expirationdate is null) OR (bp7l.effectivedate <> bp7l.expirationdate)
+left join pcadmin.PCX_BP7BUILDING@gw_prd_link BLDG on bldg.location = bp7l.id
+left join pcadmin.PCX_BP7CLASSIFICATION@gw_prd_link BP7C on BP7C.building = BLDG.id
+left join pcadmin.PCX_BP7CLASSCODE@gw_prd_link BP7CC on BP7CC.code = BP7C.bp7classcode
+where bp7l.branchid = 566321 and pl.addressline1internal like '3510%'
+;
+
+
+select BP7CC.code, BP7C.bp7classcode from 
+pcadmin.PCX_BP7CLASSIFICATION@gw_prd_link BP7C
+left outer join pcadmin.PCX_BP7CLASSCODE@gw_prd_link BP7CC on BP7CC.code = BP7C.bp7classcode
+;
+--503329;
+
+
+
+
